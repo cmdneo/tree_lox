@@ -25,7 +25,7 @@ func (s *Scanner) NextToken() token.Token {
 	s.skipBlanks()
 	// We use a loop since there can be multiple consecutive comments.
 	for s.peek() == '/' && s.peekNext() == '/' {
-		for s.advance() != '\n' {
+		for !s.isAtEnd() && s.advance() != '\n' {
 			// Consume the line.
 		}
 		s.skipBlanks()

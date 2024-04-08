@@ -58,7 +58,7 @@ func (p ExprPrinter) VisitSetExpr(e ast.Set) any {
 }
 
 func (p ExprPrinter) VisitSuperExpr(e ast.Super) any {
-	return "super." + e.Keyword.Lexeme
+	return "super." + e.Method.Lexeme
 }
 
 func (p ExprPrinter) VisitThisExpr(e ast.This) any {
