@@ -16,6 +16,7 @@ type Interpreter struct {
 	localEnv *object.LocalEnv
 	// Functions we are currently inside.
 	calledFunctions []string
+	calledFunction  []callInfo
 	// Current stack distance from the error site.
 	errorDistance int
 	// Return value, only one function returns it value at a time.
@@ -24,12 +25,18 @@ type Interpreter struct {
 
 type runtimeError struct{}
 
+type callInfo struct {
+	FunctionName string
+	CallLine     int
+}
+
 func MakeInterpreter() Interpreter {
 	return Interpreter{
 		globals:  map[string]any{},
 		localEnv: nil,
 		// The top-level implicit function is named '<script>'.
 		calledFunctions: []string{"<script>"},
+		calledFunction:  []callInfo{},
 		errorDistance:   0,
 	}
 }
@@ -40,7 +47,7 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 		case nil:
 		case runtimeError:
 			// Just handle it, the error messages when the error is made and
-			// further stack trace by VisitCallExpr via panic recovery.
+			// TODO Print call stack for error
 		default:
 			panic(err)
 		}
@@ -49,7 +56,7 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 	// Discard all previous local environments (if any) left due to
 	// any error in the code executed.
 	i.localEnv = nil
-	// i.calledFunctions = i.calledFunctions[:1]
+	i.calledFunctions = i.calledFunctions[:1]
 	i.errorDistance = 0
 
 	for _, stmt := range statements {
@@ -80,7 +87,7 @@ func (i *Interpreter) VisitExpressionStmt(s *ast.Expression) ast.ControlKind {
 }
 
 func (i *Interpreter) VisitPrintStmt(s *ast.Print) ast.ControlKind {
-	fmt.Printf("%v\n", i.evaluate(s.Expression))
+	fmt.Printf("%v\n", object.AsString(i.evaluate(s.Expression)))
 	return ast.ControlLinear
 }
 
@@ -171,8 +178,6 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 	if superclass != nil {
 		i.localEnv = object.NewLocalEnv(i.localEnv)
 		i.defineVariable("super", *superclass)
-		// Pop the 'super' environment at end.
-		defer func() { i.localEnv = i.localEnv.GetEnclosing() }()
 	}
 
 	// The environment containing 'this' is created per instance per method
@@ -203,7 +208,17 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 		}
 	}
 
-	class := object.Class{Name: s.Name.Lexeme, Methods: methodMap}
+	// Pop the 'super' environment.
+	if superclass != nil {
+		i.localEnv = i.localEnv.GetEnclosing()
+	}
+
+	// Define the class after popping the 'super' environment.
+	class := object.Class{
+		Name:       s.Name.Lexeme,
+		Methods:    methodMap,
+		Superclass: superclass,
+	}
 	i.defineVariable(class.Name, class)
 
 	return ast.ControlLinear
@@ -354,28 +369,9 @@ func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) any {
 }
 
 func (i *Interpreter) VisitCallExpr(e *ast.Call) any {
-	func() {
-		// If any runtime error happens then print call location and re-panic.
-		defer func() {
-			switch r := recover().(type) {
-			case nil:
-			case runtimeError:
-				i.errorDistance++
-				// Print the call site(line and caller) of the function.
-				printLocation(
-					i.errorDistance, e.Paren.Line,
-					*util.Last(i.calledFunctions),
-				)
-				panic(r)
+	// _ = i.evaluate(e.Callee)
 
-			default:
-				panic(r)
-			}
-		}()
-
-		i.performCall(e)
-	}()
-
+	i.performCall(e)
 	return i.returnedValue
 }
 
@@ -392,8 +388,10 @@ func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
 }
 
 func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
-	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
-		obj.Set(e.Name.Lexeme, i.evaluate(e.Value))
+	if instance, ok := i.evaluate(e.Object).(object.Instance); ok {
+		val := i.evaluate(e.Value)
+		instance.Set(e.Name.Lexeme, val)
+		return val
 	}
 
 	panic(i.makeError(e.Name, "Only instances have fields."))
@@ -401,9 +399,13 @@ func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
 
 func (i *Interpreter) VisitSuperExpr(e *ast.Super) any {
 	// 'super' is guranteed to be a class.
-	super := i.resolveVariable(&e.Variable).(object.Class)
-	if method, ok := super.Methods[e.Method.Lexeme]; ok {
-		return method
+	super, ok := i.resolveVariable(&e.Variable).(object.Class)
+	if !ok {
+		panic("'super' is not a class")
+	}
+
+	if method := super.Get(e.Method.Lexeme); method != nil {
+		return *method
 	}
 
 	panic(i.makeError(e.Method, "Undefined property '%v'.", e.Method.Lexeme))
@@ -492,11 +494,17 @@ func (i *Interpreter) performCall(e *ast.Call) any {
 	// TODO improve this garbage!
 	switch obj := callee.(type) {
 	case object.Class:
-		// TODO Return 'this' from here not the implicit nil.
-		fun := obj.Methods["init"]
+		// 'init' method is always present in a class, see VisitClassStmt.
+		instance := object.Instance{Fields: map[string]any{}, Class: obj}
+		init, ok := instance.Get("init")
+		if !ok {
+			panic("'init' method should always exist.")
+		}
+
+		fun := init.(object.Function)
 		fun_env.SetEnclosing(fun.Enclosing)
 		i.executeBlock(fun.Declaration.Body, fun_env)
-		return i.returnedValue
+		return instance
 
 	case object.Function:
 		fun_env.SetEnclosing(obj.Enclosing)

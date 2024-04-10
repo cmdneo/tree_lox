@@ -30,10 +30,12 @@ func (f *Function) Arity() int {
 }
 
 func (f *Function) bind(instance *Instance) Function {
-	// Put the instance in a new scope enclosed by the method's scope.
-	// This way we can bind the instance to the method accessed.
+	// Put the instance in a new scope enclosed by the scope which
+	// previously enclosed the function's scope.
+	// This way we can bind the instance to the function accessed, thus
+	// making the function a bound method.
 	env := NewLocalEnv(f.Enclosing)
-	env.PushVariable(*instance) // Add 'this'.
+	env.PushVariable(*instance) // add 'this'.
 
 	return Function{Declaration: f.Declaration, Enclosing: env}
 }
@@ -53,7 +55,8 @@ func (n *NativeFunction) Arity() int {
 // Lox class object
 // --------------------------------------------------------
 type Class struct {
-	Name       string
+	Name string
+	// FIXME Store function as pointer or value??
 	Methods    map[string]Function
 	Superclass *Class // Can be nil
 }
@@ -63,6 +66,16 @@ func (c *Class) Arity() int {
 		return method.Arity()
 	} else {
 		return 0
+	}
+}
+
+func (c *Class) Get(name string) *Function {
+	if fun, ok := c.Methods[name]; ok {
+		return &fun
+	} else if c.Superclass != nil {
+		return c.Superclass.Get(name)
+	} else {
+		return nil
 	}
 }
 
@@ -77,7 +90,7 @@ func (i *Instance) Get(name string) (any, bool) {
 	// Fields take precedence over methods
 	if value, ok := i.Fields[name]; ok {
 		return value, true
-	} else if method, ok := i.Class.Methods[name]; ok {
+	} else if method := i.Class.Get(name); method != nil {
 		// Puts 'this' so that the method can access it.
 		return method.bind(i), true
 	} else {
