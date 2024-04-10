@@ -173,6 +173,7 @@ func (p *Parser) function(kind functionKind) *ast.Function {
 
 	// Begin instance scope(if applicable) which contains 'this' and
 	// define 'this ' int it. This scope is encloses the function's scope.
+	// And is enclosed by the scope in which the function resides.
 	switch p.currentFunction {
 	case kindMethod, kindInitializer:
 		p.pushScope()
@@ -399,6 +400,11 @@ func (p *Parser) block() ast.Stmt {
 }
 
 func (p *Parser) expressionStatement() ast.Stmt {
+	// Permit empty expressions, treat it like: "nil;"
+	if p.match(token.SEMICOLON) {
+		return &ast.Expression{Expression: &ast.Literal{Value: nil}}
+	}
+
 	expr := p.expression()
 	p.consume(token.SEMICOLON, "Expect ';' after expression.")
 
@@ -578,7 +584,7 @@ func (p *Parser) this() ast.Expr {
 	}
 
 	// 'this' is resolved just like any ordinary local variable, since we put
-	// it inside a scope which is enclosed by the scope of a method.
+	// it inside a scope which encloses the scope of a method.
 	v := p.useVariable(p.previous)
 	return &ast.This{Variable: v}
 }
@@ -593,7 +599,7 @@ func (p *Parser) super() ast.Expr {
 	// Continue after the error as the syntax is well formed.
 
 	// 'super' is resolved just like any ordinary local variable, since we put
-	// it inside a scope enclosing the scope containing 'this'.
+	// it inside a scope enclosing the scope of the method.
 	v := p.useVariable(p.previous)
 	p.consume(token.DOT, "Expect '.' after super.")
 
@@ -754,7 +760,7 @@ func (p *Parser) consume(kind token.TokenKind, message string) token.Token {
 		return p.advance()
 	}
 
-	p.error(message)
+	p.error_at(p.current, message)
 	panic(SyntaxError{})
 }
 
