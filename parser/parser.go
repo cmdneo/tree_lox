@@ -53,8 +53,14 @@ func (p *Parser) Parse() []ast.Stmt {
 		func() {
 			// Synchronize tokens if malformed syntax is detected.
 			defer func() {
-				if v := recover(); v != nil {
+				switch v := recover().(type) {
+				case nil:
+				case SyntaxError:
 					p.synchronize()
+
+				default:
+					panic(v)
+
 				}
 			}()
 
@@ -126,8 +132,12 @@ func (p *Parser) classDeclaration() ast.Stmt {
 		defer p.popScope()
 	}
 
-	// 'this' is put inside
-	ret := ast.Class{Name: name, Superclass: superclass}
+	// 'this' is put inside the scope enclosing of each bound method.
+	ret := ast.Class{
+		Name:       name,
+		Methods:    map[string]*ast.Function{},
+		Superclass: superclass,
+	}
 
 	for !p.check(token.RIGHT_BRACE) && !p.check(token.END_OF_FILE) {
 		// Class constructor is named 'init'.
