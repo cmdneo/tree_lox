@@ -11,11 +11,11 @@ func (p ExprPrinter) print(e ast.Expr) string {
 	return e.Accept(ExprPrinter{}).(string)
 }
 
-func (p ExprPrinter) VisitAssignExpr(e ast.Assign) any {
-	return parens("=", p.print(e.Target), p.print(e.Expr))
+func (p ExprPrinter) VisitAssignExpr(e *ast.Assign) any {
+	return parens("=", p.print(&e.Target), p.print(e.Expr))
 }
 
-func (p ExprPrinter) VisitTernaryExpr(e ast.Ternary) any {
+func (p ExprPrinter) VisitTernaryExpr(e *ast.Ternary) any {
 	return parens(
 		"?:",
 		p.print(e.Condition),
@@ -24,20 +24,19 @@ func (p ExprPrinter) VisitTernaryExpr(e ast.Ternary) any {
 	)
 }
 
-func (p ExprPrinter) VisitLogicalExpr(e ast.Logical) any {
+func (p ExprPrinter) VisitLogicalExpr(e *ast.Logical) any {
 	return parens(e.Operator.Lexeme, p.print(e.Left), p.print(e.Right))
 }
 
-func (p ExprPrinter) VisitBinaryExpr(e ast.Binary) any {
+func (p ExprPrinter) VisitBinaryExpr(e *ast.Binary) any {
 	return parens(e.Operator.Lexeme, p.print(e.Left), p.print(e.Right))
-
 }
 
-func (p ExprPrinter) VisitUnaryExpr(e ast.Unary) any {
+func (p ExprPrinter) VisitUnaryExpr(e *ast.Unary) any {
 	return parens(e.Operator.Lexeme, p.print(e.Right))
 }
 
-func (p ExprPrinter) VisitCallExpr(e ast.Call) any {
+func (p ExprPrinter) VisitCallExpr(e *ast.Call) any {
 	// Put initial content before args
 	args := []string{"()", p.print(e.Callee) + ":"}
 
@@ -49,31 +48,31 @@ func (p ExprPrinter) VisitCallExpr(e ast.Call) any {
 
 }
 
-func (p ExprPrinter) VisitGetExpr(e ast.Get) any {
+func (p ExprPrinter) VisitGetExpr(e *ast.Get) any {
 	return parens("get", p.print(e.Object), e.Name.Lexeme)
 }
 
-func (p ExprPrinter) VisitSetExpr(e ast.Set) any {
+func (p ExprPrinter) VisitSetExpr(e *ast.Set) any {
 	return parens("get", p.print(e.Object), e.Name.Lexeme, p.print(e.Value))
 }
 
-func (p ExprPrinter) VisitSuperExpr(e ast.Super) any {
+func (p ExprPrinter) VisitSuperExpr(e *ast.Super) any {
 	return "super." + e.Method.Lexeme
 }
 
-func (p ExprPrinter) VisitThisExpr(e ast.This) any {
+func (p ExprPrinter) VisitThisExpr(e *ast.This) any {
 	return "this"
 }
 
-func (p ExprPrinter) VisitGroupingExpr(e ast.Grouping) any {
+func (p ExprPrinter) VisitGroupingExpr(e *ast.Grouping) any {
 	return parens("group", p.print(e.Expr))
 }
 
-func (p ExprPrinter) VisitLiteralExpr(e ast.Literal) any {
+func (p ExprPrinter) VisitLiteralExpr(e *ast.Literal) any {
 	return object.AsString(e)
 }
 
-func (p ExprPrinter) VisitVariableExpr(e ast.Variable) any {
+func (p ExprPrinter) VisitVariableExpr(e *ast.Variable) any {
 	if e.Distance < 0 {
 		return "gvar:" + e.Name.Lexeme
 	} else {

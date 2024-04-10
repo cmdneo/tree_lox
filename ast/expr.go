@@ -9,19 +9,19 @@ type Expr interface {
 }
 
 type ExprVisitor interface {
-	VisitAssignExpr(e Assign) any
-	VisitTernaryExpr(e Ternary) any
-	VisitLogicalExpr(e Logical) any
-	VisitBinaryExpr(e Binary) any
-	VisitUnaryExpr(e Unary) any
-	VisitCallExpr(e Call) any
-	VisitGetExpr(e Get) any
-	VisitSetExpr(e Set) any
-	VisitSuperExpr(e Super) any
-	VisitThisExpr(e This) any
-	VisitGroupingExpr(e Grouping) any
-	VisitLiteralExpr(e Literal) any
-	VisitVariableExpr(e Variable) any
+	VisitAssignExpr(e *Assign) any
+	VisitTernaryExpr(e *Ternary) any
+	VisitLogicalExpr(e *Logical) any
+	VisitBinaryExpr(e *Binary) any
+	VisitUnaryExpr(e *Unary) any
+	VisitCallExpr(e *Call) any
+	VisitGetExpr(e *Get) any
+	VisitSetExpr(e *Set) any
+	VisitSuperExpr(e *Super) any
+	VisitThisExpr(e *This) any
+	VisitGroupingExpr(e *Grouping) any
+	VisitLiteralExpr(e *Literal) any
+	VisitVariableExpr(e *Variable) any
 }
 
 type Assign struct {
@@ -94,16 +94,16 @@ type Literal struct {
 }
 
 // Implement the Expr interface for each expression type we have.
-func (e Assign) Accept(v ExprVisitor) any   { return v.VisitAssignExpr(e) }
-func (e Ternary) Accept(v ExprVisitor) any  { return v.VisitTernaryExpr(e) }
-func (e Logical) Accept(v ExprVisitor) any  { return v.VisitLogicalExpr(e) }
-func (e Binary) Accept(v ExprVisitor) any   { return v.VisitBinaryExpr(e) }
-func (e Unary) Accept(v ExprVisitor) any    { return v.VisitUnaryExpr(e) }
-func (e Call) Accept(v ExprVisitor) any     { return v.VisitCallExpr(e) }
-func (e Get) Accept(v ExprVisitor) any      { return v.VisitGetExpr(e) }
-func (e Set) Accept(v ExprVisitor) any      { return v.VisitSetExpr(e) }
-func (e Super) Accept(v ExprVisitor) any    { return v.VisitSuperExpr(e) }
-func (e This) Accept(v ExprVisitor) any     { return v.VisitThisExpr(e) }
-func (e Grouping) Accept(v ExprVisitor) any { return v.VisitGroupingExpr(e) }
-func (e Literal) Accept(v ExprVisitor) any  { return v.VisitLiteralExpr(e) }
-func (e Variable) Accept(v ExprVisitor) any { return v.VisitVariableExpr(e) }
+func (e *Assign) Accept(v ExprVisitor) any   { return v.VisitAssignExpr(e) }
+func (e *Ternary) Accept(v ExprVisitor) any  { return v.VisitTernaryExpr(e) }
+func (e *Logical) Accept(v ExprVisitor) any  { return v.VisitLogicalExpr(e) }
+func (e *Binary) Accept(v ExprVisitor) any   { return v.VisitBinaryExpr(e) }
+func (e *Unary) Accept(v ExprVisitor) any    { return v.VisitUnaryExpr(e) }
+func (e *Call) Accept(v ExprVisitor) any     { return v.VisitCallExpr(e) }
+func (e *Get) Accept(v ExprVisitor) any      { return v.VisitGetExpr(e) }
+func (e *Set) Accept(v ExprVisitor) any      { return v.VisitSetExpr(e) }
+func (e *Super) Accept(v ExprVisitor) any    { return v.VisitSuperExpr(e) }
+func (e *This) Accept(v ExprVisitor) any     { return v.VisitThisExpr(e) }
+func (e *Grouping) Accept(v ExprVisitor) any { return v.VisitGroupingExpr(e) }
+func (e *Literal) Accept(v ExprVisitor) any  { return v.VisitLiteralExpr(e) }
+func (e *Variable) Accept(v ExprVisitor) any { return v.VisitVariableExpr(e) }

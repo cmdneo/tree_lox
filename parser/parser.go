@@ -141,11 +141,11 @@ func (p *Parser) classDeclaration() ast.Stmt {
 	}
 
 	p.consume(token.RIGHT_BRACE, "Expect '}' after class body.")
-	return ret
+	return &ret
 }
 
 // For functions, methods and initializers, manages its own scope.
-func (p *Parser) function(kind functionKind) ast.Function {
+func (p *Parser) function(kind functionKind) *ast.Function {
 	// Track if inside a function.
 	old_func := p.currentFunction
 	p.currentFunction = kind
@@ -199,14 +199,14 @@ func (p *Parser) function(kind functionKind) ast.Function {
 	p.consume(token.LEFT_BRACE, "Expect '{' before "+kind_str+" body.")
 	body := p.bareBlock()
 
-	return ast.Function{Name: name, Params: params, Body: body}
+	return &ast.Function{Name: name, Params: params, Body: body}
 }
 
 func (p *Parser) varDeclaration() ast.Stmt {
 	name := p.consume(token.IDENTIFIER, "Expect a variable name.")
 	p.declareVariable(name.Lexeme)
 
-	init_value := ast.Expr(ast.Literal{Value: nil})
+	init_value := ast.Expr(&ast.Literal{Value: nil})
 
 	if p.match(token.EQUAL) {
 		init_value = p.expression()
@@ -215,7 +215,7 @@ func (p *Parser) varDeclaration() ast.Stmt {
 	p.defineVariable()
 
 	p.consume(token.SEMICOLON, "Expect ';' after variable declaration.")
-	return ast.Var{Name: name, Initializer: init_value}
+	return &ast.Var{Name: name, Initializer: init_value}
 }
 
 func (p *Parser) statement() ast.Stmt {
@@ -252,14 +252,14 @@ func (p *Parser) assertStatement() ast.Stmt {
 	expr := p.expression()
 	p.consume(token.SEMICOLON, "Expect ';' after expression.")
 
-	return ast.Assert{Expression: expr, Keyword: keyword}
+	return &ast.Assert{Expression: expr, Keyword: keyword}
 }
 
 func (p *Parser) printStatement() ast.Stmt {
 	expr := p.expression()
 	p.consume(token.SEMICOLON, "Expect ';' after expression.")
 
-	return ast.Print{Expression: expr}
+	return &ast.Print{Expression: expr}
 
 }
 
@@ -267,14 +267,14 @@ func (p *Parser) breakStatement() ast.Stmt {
 	kw := p.previous
 	p.consume(token.SEMICOLON, "Expect ';' after 'break'.")
 
-	return ast.Break{Keyword: kw}
+	return &ast.Break{Keyword: kw}
 }
 
 func (p *Parser) continueStatement() ast.Stmt {
 	kw := p.previous
 	p.consume(token.SEMICOLON, "Expect ';' after 'continue'.")
 
-	return ast.Continue{Keyword: kw}
+	return &ast.Continue{Keyword: kw}
 }
 
 func (p *Parser) returnStatement() ast.Stmt {
@@ -288,7 +288,7 @@ func (p *Parser) returnStatement() ast.Stmt {
 		p.consume(token.SEMICOLON, "Expect ';' after return.")
 	}
 
-	return ast.Return{Keyword: kw, Value: value}
+	return &ast.Return{Keyword: kw, Value: value}
 }
 
 func (p *Parser) ifStatement() ast.Stmt {
@@ -302,7 +302,7 @@ func (p *Parser) ifStatement() ast.Stmt {
 		else_branch = p.statement()
 	}
 
-	return ast.If{
+	return &ast.If{
 		Condition:  condition,
 		ThenBranch: then_branch,
 		ElseBranch: else_branch,
@@ -323,7 +323,7 @@ func (p *Parser) whileStatement() ast.Stmt {
 
 	// A while loop is just a for loop with no update expression and
 	// initializer. Like so: for (condition) body_stmt
-	return ast.For{Condition: condition, Body: body, Update: nil}
+	return &ast.For{Condition: condition, Body: body, Update: nil}
 }
 
 func (p *Parser) forStatement() ast.Stmt {
@@ -352,7 +352,8 @@ func (p *Parser) forStatement() ast.Stmt {
 		init = p.expressionStatement()
 	}
 
-	cond := ast.Expr(ast.Literal{Value: true})
+	// If condition is empty it it true by default.
+	cond := ast.Expr(&ast.Literal{Value: true})
 	if !p.check(token.SEMICOLON) {
 		cond = p.expression()
 	}
@@ -371,21 +372,23 @@ func (p *Parser) forStatement() ast.Stmt {
 		Update:    update,
 		Body:      body,
 	}
-	return ast.MakeBlock(init, for_loop)
+
+	// Do the construction: { initializer; for_loop }
+	return ast.NewBlock(init, &for_loop)
 }
 
 func (p *Parser) block() ast.Stmt {
 	p.pushScope()
 	defer p.popScope()
 
-	return ast.MakeBlock(p.bareBlock()...)
+	return ast.NewBlock(p.bareBlock()...)
 }
 
 func (p *Parser) expressionStatement() ast.Stmt {
 	expr := p.expression()
 	p.consume(token.SEMICOLON, "Expect ';' after expression.")
 
-	return ast.Expression{Expression: expr}
+	return &ast.Expression{Expression: expr}
 }
 
 // Expression parsing methods
@@ -405,12 +408,12 @@ func (p *Parser) assignment() ast.Expr {
 		value := p.assignment()
 
 		switch target := expr.(type) {
-		case ast.Variable:
-			return ast.Assign{Target: target, Expr: value}
-		case ast.Get:
+		case *ast.Variable:
+			return &ast.Assign{Target: *target, Expr: value}
+		case *ast.Get:
 			// If Get(like: expr.name) then transform it into Set.
 			// Where the name is the property to be set.
-			return ast.Set{
+			return &ast.Set{
 				Object: target.Object,
 				Name:   target.Name,
 				Value:  value,
@@ -432,7 +435,7 @@ func (p *Parser) ternary() ast.Expr {
 		p.consume(token.COLON, "Expect colon in ternary expression.")
 		false_expr := p.ternary()
 
-		return ast.Ternary{
+		return &ast.Ternary{
 			Condition: expr,
 			TrueExpr:  true_expr,
 			FalseExpr: false_expr,
@@ -442,46 +445,53 @@ func (p *Parser) ternary() ast.Expr {
 	return expr
 }
 
-// Generic helper function for parsing left-associative binary expressions.
-func doLefBinaryExpr[E ast.Binary | ast.Logical](
-	p *Parser, next_rule func() ast.Expr, matches ...token.TokenKind) ast.Expr {
+// Helper function for parsing left-associative binary expressions.
+// Uses ast.Logical as node type if is_logical is true, otherwise uses ast.Binary.
+func doLefBinaryExpr(
+	is_logical bool,
+	p *Parser, next_rule func() ast.Expr, matches ...token.TokenKind,
+) ast.Expr {
 	left := next_rule()
 
 	for p.match_any(matches...) {
 		op := p.previous
 		right := next_rule()
 
-		left = ast.Expr(E{Operator: op, Left: left, Right: right})
+		if is_logical {
+			left = &ast.Logical{Operator: op, Left: left, Right: right}
+		} else {
+			left = &ast.Binary{Operator: op, Left: left, Right: right}
+		}
 	}
 
 	return left
 }
 
 func (p *Parser) logicOr() ast.Expr {
-	return doLefBinaryExpr[ast.Logical](p, p.logicAnd, token.OR)
+	return doLefBinaryExpr(true, p, p.logicAnd, token.OR)
 }
 
 func (p *Parser) logicAnd() ast.Expr {
-	return doLefBinaryExpr[ast.Logical](p, p.equality, token.AND)
+	return doLefBinaryExpr(true, p, p.equality, token.AND)
 }
 
 func (p *Parser) equality() ast.Expr {
-	return doLefBinaryExpr[ast.Binary](p, p.comparison,
+	return doLefBinaryExpr(false, p, p.comparison,
 		token.EQUAL_EQUAL, token.BANG_EQUAL)
 }
 
 func (p *Parser) comparison() ast.Expr {
-	return doLefBinaryExpr[ast.Binary](p, p.term,
+	return doLefBinaryExpr(false, p, p.term,
 		token.LESS, token.LESS_EQUAL, token.GREATER, token.GREATER_EQUAL)
 }
 
 func (p *Parser) term() ast.Expr {
-	return doLefBinaryExpr[ast.Binary](p, p.factor,
+	return doLefBinaryExpr(false, p, p.factor,
 		token.PLUS, token.MINUS)
 }
 
 func (p *Parser) factor() ast.Expr {
-	return doLefBinaryExpr[ast.Binary](p, p.unary,
+	return doLefBinaryExpr(false, p, p.unary,
 		token.STAR, token.SLASH)
 }
 
@@ -489,7 +499,7 @@ func (p *Parser) unary() ast.Expr {
 	if p.match_any(token.BANG, token.PLUS, token.MINUS) {
 		op := p.previous
 		right := p.unary()
-		return ast.Unary{Operator: op, Right: right}
+		return &ast.Unary{Operator: op, Right: right}
 	}
 
 	return p.call()
@@ -503,9 +513,9 @@ func (p *Parser) call() ast.Expr {
 	for {
 		if p.match(token.DOT) {
 			name := p.consume(token.IDENTIFIER, "Expect property name after '.'.")
-			expr = ast.Get{Object: expr, Name: name}
+			expr = &ast.Get{Object: expr, Name: name}
 		} else if p.match(token.LEFT_PAREN) {
-			expr = p.finish_call(expr)
+			expr = p.finishCall(expr)
 		} else {
 			break
 		}
@@ -517,11 +527,11 @@ func (p *Parser) call() ast.Expr {
 func (p *Parser) primary() ast.Expr {
 	switch {
 	case p.match(token.FALSE):
-		return ast.Literal{Value: false}
+		return &ast.Literal{Value: false}
 	case p.match(token.TRUE):
-		return ast.Literal{Value: true}
+		return &ast.Literal{Value: true}
 	case p.match(token.NIL):
-		return ast.Literal{Value: nil}
+		return &ast.Literal{Value: nil}
 
 	case p.match(token.THIS):
 		return p.this()
@@ -530,15 +540,16 @@ func (p *Parser) primary() ast.Expr {
 		return p.super()
 
 	case p.match_any(token.NUMBER, token.STRING):
-		return ast.Literal{Value: p.previous.Literal}
+		return &ast.Literal{Value: p.previous.Literal}
 
 	case p.match(token.IDENTIFIER):
-		return p.useVariable(p.previous)
+		tmp := p.useVariable(p.previous)
+		return &tmp
 
 	case p.match(token.LEFT_PAREN):
 		expr := p.expression()
 		p.consume(token.RIGHT_PAREN, "Expect ')' after expression.")
-		return ast.Grouping{Expr: expr}
+		return &ast.Grouping{Expr: expr}
 
 	}
 
@@ -555,7 +566,7 @@ func (p *Parser) this() ast.Expr {
 	// 'this' is resolved just like any ordinary local variable, since we put
 	// it inside a scope which is enclosed by the scope of a method.
 	v := p.useVariable(p.previous)
-	return ast.This{Variable: v}
+	return &ast.This{Variable: v}
 }
 
 func (p *Parser) super() ast.Expr {
@@ -574,7 +585,7 @@ func (p *Parser) super() ast.Expr {
 
 	// Any usage'super' must access a method of the superclass.
 	method := p.consume(token.IDENTIFIER, "Expect superclass method name.")
-	return ast.Super{Variable: v, Method: method}
+	return &ast.Super{Variable: v, Method: method}
 }
 
 // Parsing helpers
@@ -593,7 +604,7 @@ func (p *Parser) bareBlock() []ast.Stmt {
 }
 
 // Parses call arguments: (expr (',' expr)*)? ')'
-func (p *Parser) finish_call(callee ast.Expr) ast.Call {
+func (p *Parser) finishCall(callee ast.Expr) *ast.Call {
 	args := make([]ast.Expr, 0)
 
 	if !p.check(token.RIGHT_PAREN) {
@@ -614,7 +625,7 @@ func (p *Parser) finish_call(callee ast.Expr) ast.Call {
 	}
 
 	paren := p.consume(token.RIGHT_PAREN, "Expect ')' after arguments.")
-	return ast.Call{Callee: callee, Paren: paren, Arguments: args}
+	return &ast.Call{Callee: callee, Paren: paren, Arguments: args}
 }
 
 // Variable and scope management

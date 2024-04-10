@@ -20,7 +20,7 @@ type TypeError struct{}
 // Lox function object
 // --------------------------------------------------------
 type Function struct {
-	Declaration ast.Function
+	Declaration *ast.Function
 	Enclosing   *LocalEnv
 	IsInit      bool // Is class constructor?
 }

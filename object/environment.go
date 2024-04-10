@@ -5,8 +5,10 @@ type LocalEnv struct {
 	values    []any
 }
 
+const initialEnvSize int = 4
+
 func NewLocalEnv(enclosing *LocalEnv) *LocalEnv {
-	return &LocalEnv{values: make([]any, 0), enclosing: enclosing}
+	return &LocalEnv{values: make([]any, 0, initialEnvSize), enclosing: enclosing}
 }
 
 func (e *LocalEnv) PushVariable(value any) {

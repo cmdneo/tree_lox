@@ -57,23 +57,34 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 	}
 }
 
+// Wrapper methods which pass in the interpreter as a
+// visitor to the statements and expressions.
+// --------------------------------------------------------
+func (i *Interpreter) execute(e ast.Stmt) ast.ControlKind {
+	return e.Accept(i)
+}
+
+func (i *Interpreter) evaluate(e ast.Expr) any {
+	return e.Accept(i)
+}
+
 // Statement evaluators
 // --------------------------------------------------------
-func (i *Interpreter) VisitBlockStmt(s ast.Block) ast.ControlKind {
+func (i *Interpreter) VisitBlockStmt(s *ast.Block) ast.ControlKind {
 	return i.executeBlock(s.Statements, object.NewLocalEnv(i.localEnv))
 }
 
-func (i *Interpreter) VisitExpressionStmt(s ast.Expression) ast.ControlKind {
+func (i *Interpreter) VisitExpressionStmt(s *ast.Expression) ast.ControlKind {
 	i.evaluate(s.Expression)
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitPrintStmt(s ast.Print) ast.ControlKind {
+func (i *Interpreter) VisitPrintStmt(s *ast.Print) ast.ControlKind {
 	fmt.Printf("%v\n", i.evaluate(s.Expression))
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitAssertStmt(s ast.Assert) ast.ControlKind {
+func (i *Interpreter) VisitAssertStmt(s *ast.Assert) ast.ControlKind {
 	if !object.Truthiness(i.evaluate(s.Expression)) {
 		panic(i.makeError(s.Keyword, "Assertion failure."))
 	} else {
@@ -81,15 +92,15 @@ func (i *Interpreter) VisitAssertStmt(s ast.Assert) ast.ControlKind {
 	}
 }
 
-func (i *Interpreter) VisitBreakStmt(s ast.Break) ast.ControlKind {
+func (i *Interpreter) VisitBreakStmt(s *ast.Break) ast.ControlKind {
 	return ast.ControlBreak
 }
 
-func (i *Interpreter) VisitContinueStmt(s ast.Continue) ast.ControlKind {
+func (i *Interpreter) VisitContinueStmt(s *ast.Continue) ast.ControlKind {
 	return ast.ControlContinue
 }
 
-func (i *Interpreter) VisitReturnStmt(s ast.Return) ast.ControlKind {
+func (i *Interpreter) VisitReturnStmt(s *ast.Return) ast.ControlKind {
 	value := any(nil)
 	if s.Value != nil {
 		value = i.evaluate(s.Value)
@@ -99,7 +110,7 @@ func (i *Interpreter) VisitReturnStmt(s ast.Return) ast.ControlKind {
 	return ast.ControlReturn
 }
 
-func (i *Interpreter) VisitIfStmt(s ast.If) ast.ControlKind {
+func (i *Interpreter) VisitIfStmt(s *ast.If) ast.ControlKind {
 	if object.Truthiness(i.evaluate(s.Condition)) {
 		return i.execute(s.ThenBranch)
 	} else if s.ElseBranch != nil {
@@ -109,7 +120,7 @@ func (i *Interpreter) VisitIfStmt(s ast.If) ast.ControlKind {
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitForStmt(s ast.For) ast.ControlKind {
+func (i *Interpreter) VisitForStmt(s *ast.For) ast.ControlKind {
 	for object.Truthiness(i.evaluate(s.Condition)) {
 		flow := i.execute(s.Body)
 
@@ -128,25 +139,25 @@ func (i *Interpreter) VisitForStmt(s ast.For) ast.ControlKind {
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitVarStmt(s ast.Var) ast.ControlKind {
+func (i *Interpreter) VisitVarStmt(s *ast.Var) ast.ControlKind {
 	val := i.evaluate(s.Initializer)
 	i.defineVariable(s.Name.Lexeme, val)
 
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitFunctionStmt(s ast.Function) ast.ControlKind {
+func (i *Interpreter) VisitFunctionStmt(s *ast.Function) ast.ControlKind {
 	fun := object.Function{Declaration: s, Enclosing: i.localEnv}
 	i.defineVariable(s.Name.Lexeme, fun)
 
 	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitClassStmt(s ast.Class) ast.ControlKind {
+func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 	superclass := (*object.Class)(nil)
 
 	if s.Superclass != nil {
-		if class, ok := i.evaluate(*s.Superclass).(object.Class); ok {
+		if class, ok := i.evaluate(s.Superclass).(object.Class); ok {
 			superclass = &class
 		} else {
 			panic(i.makeError(s.Superclass.Name, "Superclass must be a class."))
@@ -186,7 +197,7 @@ func (i *Interpreter) VisitClassStmt(s ast.Class) ast.ControlKind {
 		}
 
 		methodMap["init"] = object.Function{
-			Declaration: initFn,
+			Declaration: &initFn,
 			Enclosing:   i.localEnv,
 			IsInit:      true,
 		}
@@ -200,7 +211,7 @@ func (i *Interpreter) VisitClassStmt(s ast.Class) ast.ControlKind {
 
 // Expression evaluators
 // --------------------------------------------------------
-func (i *Interpreter) VisitAssignExpr(e ast.Assign) any {
+func (i *Interpreter) VisitAssignExpr(e *ast.Assign) any {
 	val := i.evaluate(e.Expr)
 
 	if e.Target.Distance < 0 {
@@ -218,7 +229,7 @@ func (i *Interpreter) VisitAssignExpr(e ast.Assign) any {
 	return val
 }
 
-func (i *Interpreter) VisitTernaryExpr(e ast.Ternary) any {
+func (i *Interpreter) VisitTernaryExpr(e *ast.Ternary) any {
 	truth := object.Truthiness(i.evaluate(e.Condition))
 
 	if truth {
@@ -228,7 +239,7 @@ func (i *Interpreter) VisitTernaryExpr(e ast.Ternary) any {
 	}
 }
 
-func (i *Interpreter) VisitLogicalExpr(e ast.Logical) any {
+func (i *Interpreter) VisitLogicalExpr(e *ast.Logical) any {
 	left := i.evaluate(e.Left)
 
 	// Return the value of the expression which determines the truth value of
@@ -259,7 +270,7 @@ func hasType[T any](a, b any) bool {
 	return e && f
 }
 
-func (i *Interpreter) VisitBinaryExpr(e ast.Binary) any {
+func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) any {
 	left := i.evaluate(e.Left)
 	right := i.evaluate(e.Right)
 
@@ -316,7 +327,7 @@ func (i *Interpreter) VisitBinaryExpr(e ast.Binary) any {
 	}
 }
 
-func (i *Interpreter) VisitUnaryExpr(e ast.Unary) any {
+func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) any {
 	right := i.evaluate(e.Right)
 
 	check_num := func() {
@@ -342,7 +353,7 @@ func (i *Interpreter) VisitUnaryExpr(e ast.Unary) any {
 	}
 }
 
-func (i *Interpreter) VisitCallExpr(e ast.Call) any {
+func (i *Interpreter) VisitCallExpr(e *ast.Call) any {
 	func() {
 		// If any runtime error happens then print call location and re-panic.
 		defer func() {
@@ -368,7 +379,7 @@ func (i *Interpreter) VisitCallExpr(e ast.Call) any {
 	return i.returnedValue
 }
 
-func (i *Interpreter) VisitGetExpr(e ast.Get) any {
+func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
 	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
 		if val, ok := obj.Get(e.Name.Lexeme); ok {
 			return val
@@ -380,7 +391,7 @@ func (i *Interpreter) VisitGetExpr(e ast.Get) any {
 	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
-func (i *Interpreter) VisitSetExpr(e ast.Set) any {
+func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
 	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
 		obj.Set(e.Name.Lexeme, i.evaluate(e.Value))
 	}
@@ -388,9 +399,9 @@ func (i *Interpreter) VisitSetExpr(e ast.Set) any {
 	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
-func (i *Interpreter) VisitSuperExpr(e ast.Super) any {
+func (i *Interpreter) VisitSuperExpr(e *ast.Super) any {
 	// 'super' is guranteed to be a class.
-	super := i.resolveVariable(e.Variable).(object.Class)
+	super := i.resolveVariable(&e.Variable).(object.Class)
 	if method, ok := super.Methods[e.Method.Lexeme]; ok {
 		return method
 	}
@@ -398,19 +409,19 @@ func (i *Interpreter) VisitSuperExpr(e ast.Super) any {
 	panic(i.makeError(e.Method, "Undefined property '%v'.", e.Method.Lexeme))
 }
 
-func (i *Interpreter) VisitThisExpr(e ast.This) any {
-	return i.resolveVariable(e.Variable)
+func (i *Interpreter) VisitThisExpr(e *ast.This) any {
+	return i.resolveVariable(&e.Variable)
 }
 
-func (i *Interpreter) VisitGroupingExpr(e ast.Grouping) any {
+func (i *Interpreter) VisitGroupingExpr(e *ast.Grouping) any {
 	return i.evaluate(e.Expr)
 }
 
-func (i *Interpreter) VisitLiteralExpr(e ast.Literal) any {
+func (i *Interpreter) VisitLiteralExpr(e *ast.Literal) any {
 	return e.Value
 }
 
-func (i *Interpreter) VisitVariableExpr(e ast.Variable) any {
+func (i *Interpreter) VisitVariableExpr(e *ast.Variable) any {
 	return i.resolveVariable(e)
 }
 
@@ -432,14 +443,6 @@ func (i *Interpreter) makeError(
 
 // Utility methods
 // --------------------------------------------------------
-func (i *Interpreter) execute(e ast.Stmt) ast.ControlKind {
-	return e.Accept(i)
-}
-
-func (i *Interpreter) evaluate(e ast.Expr) any {
-	return e.Accept(i)
-}
-
 func (i *Interpreter) executeBlock(
 	statements []ast.Stmt, environ *object.LocalEnv,
 ) ast.ControlKind {
@@ -459,8 +462,8 @@ func (i *Interpreter) executeBlock(
 	return ast.ControlLinear
 }
 
-// Performs call and uses panic on controlReturn to return values.
-func (i *Interpreter) performCall(e ast.Call) any {
+// Performs call and returns the return value.
+func (i *Interpreter) performCall(e *ast.Call) any {
 	callee := i.evaluate(e.Callee)
 	arity, name, ok := getCallableInfo(callee)
 
@@ -519,7 +522,7 @@ func (i *Interpreter) defineVariable(name string, value any) {
 }
 
 // Returns the value of the variable.
-func (i *Interpreter) resolveVariable(v ast.Variable) any {
+func (i *Interpreter) resolveVariable(v *ast.Variable) any {
 	// If global variable
 	if v.Distance < 0 {
 		if value, ok := i.globals[v.Name.Lexeme]; ok {

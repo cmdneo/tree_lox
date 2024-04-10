@@ -9,18 +9,18 @@ type Stmt interface {
 }
 
 type StmtVisitor interface {
-	VisitBlockStmt(s Block) ControlKind
-	VisitExpressionStmt(s Expression) ControlKind
-	VisitPrintStmt(s Print) ControlKind
-	VisitAssertStmt(s Assert) ControlKind
-	VisitBreakStmt(s Break) ControlKind
-	VisitContinueStmt(s Continue) ControlKind
-	VisitReturnStmt(s Return) ControlKind
-	VisitIfStmt(s If) ControlKind
-	VisitForStmt(s For) ControlKind
-	VisitVarStmt(s Var) ControlKind
-	VisitFunctionStmt(s Function) ControlKind
-	VisitClassStmt(s Class) ControlKind
+	VisitBlockStmt(s *Block) ControlKind
+	VisitExpressionStmt(s *Expression) ControlKind
+	VisitPrintStmt(s *Print) ControlKind
+	VisitAssertStmt(s *Assert) ControlKind
+	VisitBreakStmt(s *Break) ControlKind
+	VisitContinueStmt(s *Continue) ControlKind
+	VisitReturnStmt(s *Return) ControlKind
+	VisitIfStmt(s *If) ControlKind
+	VisitForStmt(s *For) ControlKind
+	VisitVarStmt(s *Var) ControlKind
+	VisitFunctionStmt(s *Function) ControlKind
+	VisitClassStmt(s *Class) ControlKind
 }
 
 type Block struct {
@@ -86,24 +86,25 @@ type Function struct {
 type Class struct {
 	Name       token.Token
 	Superclass *Variable // Can be nil
-	Methods    map[string]Function
+	// FIXME Store pointer or just copy it??
+	Methods map[string]*Function
 }
 
 // Implement the Stmt interface for each statement type we have.
-func (s Block) Accept(v StmtVisitor) ControlKind      { return v.VisitBlockStmt(s) }
-func (s Expression) Accept(v StmtVisitor) ControlKind { return v.VisitExpressionStmt(s) }
-func (s Print) Accept(v StmtVisitor) ControlKind      { return v.VisitPrintStmt(s) }
-func (s Assert) Accept(v StmtVisitor) ControlKind     { return v.VisitAssertStmt(s) }
-func (s Break) Accept(v StmtVisitor) ControlKind      { return v.VisitBreakStmt(s) }
-func (s Continue) Accept(v StmtVisitor) ControlKind   { return v.VisitContinueStmt(s) }
-func (s Return) Accept(v StmtVisitor) ControlKind     { return v.VisitReturnStmt(s) }
-func (s If) Accept(v StmtVisitor) ControlKind         { return v.VisitIfStmt(s) }
-func (s For) Accept(v StmtVisitor) ControlKind        { return v.VisitForStmt(s) }
-func (s Var) Accept(v StmtVisitor) ControlKind        { return v.VisitVarStmt(s) }
-func (s Function) Accept(v StmtVisitor) ControlKind   { return v.VisitFunctionStmt(s) }
-func (s Class) Accept(v StmtVisitor) ControlKind      { return v.VisitClassStmt(s) }
+func (s *Block) Accept(v StmtVisitor) ControlKind      { return v.VisitBlockStmt(s) }
+func (s *Expression) Accept(v StmtVisitor) ControlKind { return v.VisitExpressionStmt(s) }
+func (s *Print) Accept(v StmtVisitor) ControlKind      { return v.VisitPrintStmt(s) }
+func (s *Assert) Accept(v StmtVisitor) ControlKind     { return v.VisitAssertStmt(s) }
+func (s *Break) Accept(v StmtVisitor) ControlKind      { return v.VisitBreakStmt(s) }
+func (s *Continue) Accept(v StmtVisitor) ControlKind   { return v.VisitContinueStmt(s) }
+func (s *Return) Accept(v StmtVisitor) ControlKind     { return v.VisitReturnStmt(s) }
+func (s *If) Accept(v StmtVisitor) ControlKind         { return v.VisitIfStmt(s) }
+func (s *For) Accept(v StmtVisitor) ControlKind        { return v.VisitForStmt(s) }
+func (s *Var) Accept(v StmtVisitor) ControlKind        { return v.VisitVarStmt(s) }
+func (s *Function) Accept(v StmtVisitor) ControlKind   { return v.VisitFunctionStmt(s) }
+func (s *Class) Accept(v StmtVisitor) ControlKind      { return v.VisitClassStmt(s) }
 
 // Makes a block from a list of statements
-func MakeBlock(statements ...Stmt) Block {
-	return Block{Statements: statements}
+func NewBlock(statements ...Stmt) *Block {
+	return &Block{Statements: statements}
 }
