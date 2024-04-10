@@ -141,13 +141,15 @@ func (p *Parser) classDeclaration() ast.Stmt {
 
 	for !p.check(token.RIGHT_BRACE) && !p.check(token.END_OF_FILE) {
 		// Class constructor is named 'init'.
+		// Current token must be an identifier for it to be a method.
+		name := p.current.Lexeme
 		kind := kindMethod
-		if p.current.Lexeme == "init" {
+		if name == "init" {
 			kind = kindInitializer
 		}
 
 		// If multiple methods have the same name then the last one is taken.
-		ret.Methods[p.current.Lexeme] = p.function(kind)
+		ret.Methods[name] = p.function(kind)
 	}
 
 	p.consume(token.RIGHT_BRACE, "Expect '}' after class body.")
@@ -164,15 +166,13 @@ func (p *Parser) function(kind functionKind) *ast.Function {
 	kind_str := kind.String()
 	name := p.consume(token.IDENTIFIER, "Expect "+kind_str+" name.")
 
+	// Define function in its enclosing scope.
+	// A function can refer to itself inside it.
 	p.declareVariable(name.Lexeme)
-	p.defineVariable() // A function can refer to itself inside it.
+	p.defineVariable()
 
-	// Begin function scope, function parameters reside in it.
-	p.pushScope()
-	defer p.popScope()
-
-	// Begin instance scope(if applicable) which contains 'this' and defin it.
-	// This scope is enclosed by the scope each method.
+	// Begin instance scope(if applicable) which contains 'this' and
+	// define 'this ' int it. This scope is encloses the function's scope.
 	switch p.currentFunction {
 	case kindMethod, kindInitializer:
 		p.pushScope()
@@ -180,6 +180,10 @@ func (p *Parser) function(kind functionKind) *ast.Function {
 		p.defineVariable()
 		defer p.popScope()
 	}
+
+	// Begin function scope, function parameters reside in it.
+	p.pushScope()
+	defer p.popScope()
 
 	// Parse paramaters: '(' parameters? ')'
 	p.consume(token.LEFT_PAREN, "Expect '(' after "+kind_str+" name.")
