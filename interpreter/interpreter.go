@@ -18,6 +18,8 @@ type Interpreter struct {
 	calledFunctions []string
 	// Current stack distance from the error site.
 	errorDistance int
+	// Return value, only one function returns it value at a time.
+	returnedValue any
 }
 
 type runtimeError struct{}
@@ -57,94 +59,143 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 
 // Statement evaluators
 // --------------------------------------------------------
-func (i *Interpreter) VisitBlockStmt(s ast.Block) {
-	i.executeBlock(s.Statements, object.MakeLocalEnv(i.localEnv))
+func (i *Interpreter) VisitBlockStmt(s ast.Block) ast.ControlKind {
+	return i.executeBlock(s.Statements, object.NewLocalEnv(i.localEnv))
 }
 
-func (i *Interpreter) VisitExpressionStmt(s ast.Expression) {
+func (i *Interpreter) VisitExpressionStmt(s ast.Expression) ast.ControlKind {
 	i.evaluate(s.Expression)
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitPrintStmt(s ast.Print) {
+func (i *Interpreter) VisitPrintStmt(s ast.Print) ast.ControlKind {
 	fmt.Printf("%v\n", i.evaluate(s.Expression))
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitAssertStmt(s ast.Assert) {
+func (i *Interpreter) VisitAssertStmt(s ast.Assert) ast.ControlKind {
 	if !object.Truthiness(i.evaluate(s.Expression)) {
 		panic(i.makeError(s.Keyword, "Assertion failure."))
+	} else {
+		return ast.ControlLinear
 	}
 }
 
-func (i *Interpreter) VisitBreakStmt(s ast.Break) {
-	panic(controlBreak{})
+func (i *Interpreter) VisitBreakStmt(s ast.Break) ast.ControlKind {
+	return ast.ControlBreak
 }
 
-func (i *Interpreter) VisitContinueStmt(s ast.Continue) {
-	panic(controlContinue{})
+func (i *Interpreter) VisitContinueStmt(s ast.Continue) ast.ControlKind {
+	return ast.ControlContinue
 }
 
-func (i *Interpreter) VisitReturnStmt(s ast.Return) {
+func (i *Interpreter) VisitReturnStmt(s ast.Return) ast.ControlKind {
 	value := any(nil)
 	if s.Value != nil {
 		value = i.evaluate(s.Value)
 	}
 
-	panic(controlReturn{Value: value})
+	i.returnedValue = value
+	return ast.ControlReturn
 }
 
-func (i *Interpreter) VisitIfStmt(s ast.If) {
+func (i *Interpreter) VisitIfStmt(s ast.If) ast.ControlKind {
 	if object.Truthiness(i.evaluate(s.Condition)) {
-		i.execute(s.ThenBranch)
+		return i.execute(s.ThenBranch)
 	} else if s.ElseBranch != nil {
-		i.execute(s.ElseBranch)
+		return i.execute(s.ElseBranch)
 	}
+
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitForStmt(s ast.For) {
-	// Handle break
-	defer func() {
-		switch r := recover().(type) {
-		case nil:
-		case controlBreak:
-		default:
-			panic(r)
-		}
-	}()
-
+func (i *Interpreter) VisitForStmt(s ast.For) ast.ControlKind {
 	for object.Truthiness(i.evaluate(s.Condition)) {
-		func() {
-			// Handle 'continue' statement and run the update clause.
-			defer func() {
-				switch r := recover().(type) {
-				case nil:
-				case controlContinue:
-				default:
-					panic(r)
-				}
+		flow := i.execute(s.Body)
 
-				if s.Update != nil {
-					i.evaluate(s.Update)
-				}
-			}()
+		switch flow {
+		case ast.ControlBreak:
+			return ast.ControlLinear
+		case ast.ControlReturn:
+			return ast.ControlReturn
+		}
 
-			i.execute(s.Body)
-		}()
+		if s.Update != nil {
+			i.evaluate(s.Update)
+		}
 	}
+
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitVarStmt(s ast.Var) {
+func (i *Interpreter) VisitVarStmt(s ast.Var) ast.ControlKind {
 	val := i.evaluate(s.Initializer)
 	i.defineVariable(s.Name.Lexeme, val)
+
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitFunctionStmt(s ast.Function) {
+func (i *Interpreter) VisitFunctionStmt(s ast.Function) ast.ControlKind {
 	fun := object.Function{Declaration: s, Enclosing: i.localEnv}
 	i.defineVariable(s.Name.Lexeme, fun)
+
+	return ast.ControlLinear
 }
 
-func (i *Interpreter) VisitClassStmt(s ast.Class) {
-	// TODO
-	panic("Undone!")
+func (i *Interpreter) VisitClassStmt(s ast.Class) ast.ControlKind {
+	superclass := (*object.Class)(nil)
+
+	if s.Superclass != nil {
+		if class, ok := i.evaluate(*s.Superclass).(object.Class); ok {
+			superclass = &class
+		} else {
+			panic(i.makeError(s.Superclass.Name, "Superclass must be a class."))
+		}
+	}
+
+	// Create a new environment for the superclass and define 'super' in it.
+	// It is shared among all instances since we only access the methods of the
+	// superclass and methods and do not change anything.
+	// INFO: This environment will enclose the environments of all the methods.
+	if superclass != nil {
+		i.localEnv = object.NewLocalEnv(i.localEnv)
+		i.defineVariable("super", *superclass)
+		// Pop the 'super' environment at end.
+		defer func() { i.localEnv = i.localEnv.GetEnclosing() }()
+	}
+
+	// The environment containing 'this' is created per instance per method
+	// access, not here, since it is different for each instance.
+	methodMap := map[string]object.Function{}
+	for name, fun := range s.Methods {
+		methodMap[name] = object.Function{
+			Declaration: fun,
+			Enclosing:   i.localEnv,
+			IsInit:      fun.Name.Lexeme == "init",
+		}
+	}
+
+	// If the class does not have an initializer then we add a default one
+	// with empty body and no parameters. This eliminates the special case
+	// of a class not having an initializer/constructor.
+	if _, ok := methodMap["init"]; !ok {
+		initFn := ast.Function{
+			Name:   token.Token{Lexeme: "init"},
+			Params: []token.Token{},
+			Body:   []ast.Stmt{},
+		}
+
+		methodMap["init"] = object.Function{
+			Declaration: initFn,
+			Enclosing:   i.localEnv,
+			IsInit:      true,
+		}
+	}
+
+	class := object.Class{Name: s.Name.Lexeme, Methods: methodMap}
+	i.defineVariable(class.Name, class)
+
+	return ast.ControlLinear
 }
 
 // Expression evaluators
@@ -292,31 +343,11 @@ func (i *Interpreter) VisitUnaryExpr(e ast.Unary) any {
 }
 
 func (i *Interpreter) VisitCallExpr(e ast.Call) any {
-	var ret_val any = nil
-
-	fun, ok := i.evaluate(e.Callee).(object.Function)
-
-	if !ok {
-		panic(i.makeError(e.Paren, "Can only call function and classes."))
-	}
-
-	if fun.Arity() != len(e.Arguments) {
-		panic(i.makeError(
-			e.Paren, "Expected %v arguments but got %v arguments.",
-			fun.Arity(), len(e.Arguments),
-		))
-	}
-
 	func() {
-		// Extract return value and pop off the called function name.
-		// If any runtime erro happens then
+		// If any runtime error happens then print call location and re-panic.
 		defer func() {
-			util.Pop(&i.calledFunctions)
-
 			switch r := recover().(type) {
 			case nil:
-			case controlReturn:
-				ret_val = r.Value
 			case runtimeError:
 				i.errorDistance++
 				// Print the call site(line and caller) of the function.
@@ -324,51 +355,54 @@ func (i *Interpreter) VisitCallExpr(e ast.Call) any {
 					i.errorDistance, e.Paren.Line,
 					*util.Last(i.calledFunctions),
 				)
+				panic(r)
 
-				panic(r) // re-throw the error
 			default:
 				panic(r)
 			}
-
 		}()
 
-		// Push the function name for stack trace generation.
-		i.calledFunctions = append(i.calledFunctions, fun.Declaration.Name.Lexeme)
-
-		// Evaluate arguments and put it inside the function's environment.
-		fun_env := object.MakeLocalEnv(fun.Enclosing)
-		for _, arg := range e.Arguments {
-			fun_env.PushVariable(i.evaluate(arg))
-		}
-
-		i.executeBlock(fun.Declaration.Body, fun_env)
+		i.performCall(e)
 	}()
 
-	return ret_val
+	return i.returnedValue
 }
 
 func (i *Interpreter) VisitGetExpr(e ast.Get) any {
-	// TODO
-	panic("Undone!")
+	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
+		if val, ok := obj.Get(e.Name.Lexeme); ok {
+			return val
+		}
+
+		panic(i.makeError(e.Name, "Undefined property '%v'.", e.Name.Lexeme))
+	}
+
+	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
 func (i *Interpreter) VisitSetExpr(e ast.Set) any {
-	// TODO
-	panic("Undone!")
+	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
+		obj.Set(e.Name.Lexeme, i.evaluate(e.Value))
+	}
+
+	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
 func (i *Interpreter) VisitSuperExpr(e ast.Super) any {
-	// TODO
-	panic("Undone!")
+	// 'super' is guranteed to be a class.
+	super := i.resolveVariable(e.Variable).(object.Class)
+	if method, ok := super.Methods[e.Method.Lexeme]; ok {
+		return method
+	}
+
+	panic(i.makeError(e.Method, "Undefined property '%v'.", e.Method.Lexeme))
 }
 
 func (i *Interpreter) VisitThisExpr(e ast.This) any {
-	// TODO
-	panic("Undone!")
+	return i.resolveVariable(e.Variable)
 }
 
 func (i *Interpreter) VisitGroupingExpr(e ast.Grouping) any {
-	// TODO
 	return i.evaluate(e.Expr)
 }
 
@@ -377,22 +411,15 @@ func (i *Interpreter) VisitLiteralExpr(e ast.Literal) any {
 }
 
 func (i *Interpreter) VisitVariableExpr(e ast.Variable) any {
-	// If global variable
-	if e.Distance < 0 {
-		if value, ok := i.globals[e.Name.Lexeme]; ok {
-			return value
-		}
-
-		panic(i.makeError(e.Name, "Undefined variable '%v'.", e.Name.Lexeme))
-	} else {
-		return i.localEnv.GetAt(e.Slot, e.Distance)
-	}
+	return i.resolveVariable(e)
 }
 
 // Error reporting methods
 // --------------------------------------------------------
 // Print the error message with and return a runtimeError object.
-func (i *Interpreter) makeError(tok token.Token, format string, args ...any) runtimeError {
+func (i *Interpreter) makeError(
+	tok token.Token, format string, args ...any,
+) runtimeError {
 	i.errorDistance = 0
 
 	// Print the message...
@@ -405,24 +432,79 @@ func (i *Interpreter) makeError(tok token.Token, format string, args ...any) run
 
 // Utility methods
 // --------------------------------------------------------
-func (i *Interpreter) execute(e ast.Stmt) {
-	e.Accept(i)
+func (i *Interpreter) execute(e ast.Stmt) ast.ControlKind {
+	return e.Accept(i)
 }
 
 func (i *Interpreter) evaluate(e ast.Expr) any {
 	return e.Accept(i)
 }
 
-func (i *Interpreter) executeBlock(statements []ast.Stmt, environ object.LocalEnv) {
+func (i *Interpreter) executeBlock(
+	statements []ast.Stmt, environ *object.LocalEnv,
+) ast.ControlKind {
 	// Use supplied environment to execute code and later restore the old one.
 	old_env := i.localEnv
-	i.localEnv = &environ
+	i.localEnv = environ
 	defer func() {
 		i.localEnv = old_env
 	}()
 
 	for _, stmt := range statements {
-		i.execute(stmt)
+		if flow := i.execute(stmt); flow != ast.ControlLinear {
+			return flow
+		}
+	}
+
+	return ast.ControlLinear
+}
+
+// Performs call and uses panic on controlReturn to return values.
+func (i *Interpreter) performCall(e ast.Call) any {
+	callee := i.evaluate(e.Callee)
+	arity, name, ok := getCallableInfo(callee)
+
+	if !ok {
+		panic(i.makeError(e.Paren, "Can only call functions and classes."))
+	}
+
+	if arity != len(e.Arguments) {
+		panic(i.makeError(
+			e.Paren, "Expected %v arguments but got %v arguments.",
+			arity, len(e.Arguments),
+		))
+	}
+
+	// Push the callable name for stack trace generation.
+	i.calledFunctions = append(i.calledFunctions, name)
+	defer util.Pop(&i.calledFunctions)
+
+	// Evaluate arguments and put their values inside the newly created
+	// function's environment.
+	fun_env := object.NewLocalEnv(nil)
+	for _, arg := range e.Arguments {
+		fun_env.PushVariable(i.evaluate(arg))
+	}
+
+	// TODO improve this garbage!
+	switch obj := callee.(type) {
+	case object.Class:
+		// TODO Return 'this' from here not the implicit nil.
+		fun := obj.Methods["init"]
+		fun_env.SetEnclosing(fun.Enclosing)
+		i.executeBlock(fun.Declaration.Body, fun_env)
+		return i.returnedValue
+
+	case object.Function:
+		fun_env.SetEnclosing(obj.Enclosing)
+		i.executeBlock(obj.Declaration.Body, fun_env)
+		return i.returnedValue
+
+	case object.NativeFunction:
+		return obj.Function(fun_env.GetAllValues()...)
+
+	default:
+		panic("Non callable object called.")
 	}
 }
 
@@ -436,9 +518,48 @@ func (i *Interpreter) defineVariable(name string, value any) {
 
 }
 
+// Returns the value of the variable.
+func (i *Interpreter) resolveVariable(v ast.Variable) any {
+	// If global variable
+	if v.Distance < 0 {
+		if value, ok := i.globals[v.Name.Lexeme]; ok {
+			return value
+		}
+
+		panic(i.makeError(v.Name, "Undefined variable '%v'.", v.Name.Lexeme))
+	} else {
+		return i.localEnv.GetAt(v.Slot, v.Distance)
+	}
+}
+
 // Other utility functions
 // --------------------------------------------------------
-
 func printLocation(distance, line int, funName string) {
 	fmt.Fprintf(os.Stderr, "%5v: [line %v] in %v\n", distance, line, funName)
+}
+
+// Get info if callable object, return arity and name, along with
+// if callable(as boolean).
+func getCallableInfo(callable any) (int, string, bool) {
+	arity := -1
+	name := ""
+
+	switch obj := callable.(type) {
+	case object.Class:
+		arity = obj.Arity()
+		name = obj.Name
+
+	case object.Function:
+		arity = obj.Arity()
+		name = obj.Declaration.Name.Lexeme
+
+	case object.NativeFunction:
+		arity = obj.Arity()
+		name = obj.Name
+
+	default:
+		return arity, name, false
+	}
+
+	return arity, name, true
 }

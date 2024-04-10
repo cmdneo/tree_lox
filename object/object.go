@@ -1,6 +1,7 @@
 package object
 
 import (
+	"fmt"
 	"math"
 	"strconv"
 	"tree_lox/ast"
@@ -16,23 +17,76 @@ type TypeError struct{}
 // primitive types bool, float64 and string respectively.
 // While types 'instance', 'class' and 'function' are implemented as structs.
 
+// Lox function object
+// --------------------------------------------------------
 type Function struct {
 	Declaration ast.Function
 	Enclosing   *LocalEnv
+	IsInit      bool // Is class constructor?
 }
 
 func (f *Function) Arity() int {
 	return len(f.Declaration.Params)
 }
 
+func (f *Function) bind(instance *Instance) Function {
+	// Put the instance in a new scope enclosed by the method's scope.
+	// This way we can bind the instance to the method accessed.
+	env := NewLocalEnv(f.Enclosing)
+	env.PushVariable(*instance) // Add 'this'.
+
+	return Function{Declaration: f.Declaration, Enclosing: env}
+}
+
+// Lox native function object
+// --------------------------------------------------------
+type NativeFunction struct {
+	Arity_   int
+	Function func(args ...any) any
+	Name     string
+}
+
+func (n *NativeFunction) Arity() int {
+	return n.Arity_
+}
+
+// Lox class object
+// --------------------------------------------------------
 type Class struct {
+	Name       string
 	Methods    map[string]Function
 	Superclass *Class // Can be nil
 }
 
+func (c *Class) Arity() int {
+	if method, ok := c.Methods["init"]; ok {
+		return method.Arity()
+	} else {
+		return 0
+	}
+}
+
+// Lox class instance object
+// --------------------------------------------------------
 type Instance struct {
 	Fields map[string]any
 	Class  Class
+}
+
+func (i *Instance) Get(name string) (any, bool) {
+	// Fields take precedence over methods
+	if value, ok := i.Fields[name]; ok {
+		return value, true
+	} else if method, ok := i.Class.Methods[name]; ok {
+		// Puts 'this' so that the method can access it.
+		return method.bind(i), true
+	} else {
+		return nil, false
+	}
+}
+
+func (i *Instance) Set(name string, value any) {
+	i.Fields[name] = value
 }
 
 // Logical operations
@@ -86,6 +140,7 @@ func GreaterThan(s, t any) bool {
 }
 
 func EqualTo(s, t any) bool {
+	// TODO Do proper type checks.
 	return s == t
 }
 
@@ -185,13 +240,13 @@ func AsString(s any) string {
 		return strconv.FormatFloat(v, 'f', -1, 64)
 
 	case Function:
-		return "<fn !>"
+		return fmt.Sprintf("<fn %v>", v.Declaration.Name.Lexeme)
 
 	case Class:
-		return "<class !>"
+		return fmt.Sprintf("<class %v>", v.Name)
 
 	case Instance:
-		return "<instance of !>"
+		return fmt.Sprintf("<instance of %v>", v.Class.Name)
 	}
 
 	panic(TypeError{})

@@ -22,9 +22,10 @@ type Parser struct {
 	currentClass classKind
 	// Current function type
 	currentFunction functionKind
-	// Current loop kind along with it update clause(for 'fors' loop).
+	// Current loop kind
 	currentLoop loopKind
 
+	// Was any semantic or syntax error detected while parsing.
 	hadError bool
 }
 
@@ -87,13 +88,14 @@ func (p *Parser) declaration() ast.Stmt {
 func (p *Parser) classDeclaration() ast.Stmt {
 	name := p.consume(token.IDENTIFIER, "Expect class name.")
 
-	p.declareVariable()
+	p.declareVariable(name.Lexeme)
 	p.defineVariable() // A class can refer to itself.
 
+	// Check and set if superclass exists.
 	superclass := (*ast.Variable)(nil)
 	if p.match(token.LESS) {
 		sname := p.consume(token.IDENTIFIER, "Expect superclass name.")
-		p.useVariable(sname)
+
 		if sname.Lexeme == name.Lexeme {
 			p.error("A class cannot inherit from itself.")
 			// Continue after the error as the syntax is well formed.
@@ -113,23 +115,36 @@ func (p *Parser) classDeclaration() ast.Stmt {
 
 	p.consume(token.LEFT_BRACE, "Expect '{' before class body.")
 
+	// Superclass 'super' is put in an scope which encloses all the methods'
+	// scopes. It is shared among all instances and since we only access the
+	// methods of the superclass we do not change anything.
+	if superclass != nil {
+		// Push scope for 'super' and define it.
+		p.pushScope()
+		p.declareVariable("super")
+		p.defineVariable()
+		defer p.popScope()
+	}
+
+	// 'this' is put inside
 	ret := ast.Class{Name: name, Superclass: superclass}
 
 	for !p.check(token.RIGHT_BRACE) && !p.check(token.END_OF_FILE) {
-		// If multiple methods have the same name then the last one is taken.
 		// Class constructor is named 'init'.
 		kind := kindMethod
-		if p.check(token.IDENTIFIER) && p.current.Lexeme == "init" {
+		if p.current.Lexeme == "init" {
 			kind = kindInitializer
 		}
+
+		// If multiple methods have the same name then the last one is taken.
 		ret.Methods[p.current.Lexeme] = p.function(kind)
 	}
 
 	p.consume(token.RIGHT_BRACE, "Expect '}' after class body.")
-	return &ret
+	return ret
 }
 
-// For functions, methods and initializers.
+// For functions, methods and initializers, manages its own scope.
 func (p *Parser) function(kind functionKind) ast.Function {
 	// Track if inside a function.
 	old_func := p.currentFunction
@@ -139,13 +154,24 @@ func (p *Parser) function(kind functionKind) ast.Function {
 	kind_str := kind.String()
 	name := p.consume(token.IDENTIFIER, "Expect "+kind_str+" name.")
 
-	p.declareVariable()
+	p.declareVariable(name.Lexeme)
 	p.defineVariable() // A function can refer to itself inside it.
 
-	// Begin function scope, function parameters inside the function's scope.
+	// Begin function scope, function parameters reside in it.
 	p.pushScope()
 	defer p.popScope()
 
+	// Begin instance scope(if applicable) which contains 'this' and defin it.
+	// This scope is enclosed by the scope each method.
+	switch p.currentFunction {
+	case kindMethod, kindInitializer:
+		p.pushScope()
+		p.declareVariable("this")
+		p.defineVariable()
+		defer p.popScope()
+	}
+
+	// Parse paramaters: '(' parameters? ')'
 	p.consume(token.LEFT_PAREN, "Expect '(' after "+kind_str+" name.")
 	params := make([]token.Token, 0)
 
@@ -160,7 +186,7 @@ func (p *Parser) function(kind functionKind) ast.Function {
 
 			param := p.consume(token.IDENTIFIER, "Expect parameter name.")
 			params = append(params, param)
-			p.declareVariable()
+			p.declareVariable(param.Lexeme)
 			p.defineVariable()
 
 			if !p.match(token.COMMA) {
@@ -171,14 +197,14 @@ func (p *Parser) function(kind functionKind) ast.Function {
 	p.consume(token.RIGHT_PAREN, "Expect ')' after parameters.")
 
 	p.consume(token.LEFT_BRACE, "Expect '{' before "+kind_str+" body.")
-	body := p.bare_block()
+	body := p.bareBlock()
 
 	return ast.Function{Name: name, Params: params, Body: body}
 }
 
 func (p *Parser) varDeclaration() ast.Stmt {
 	name := p.consume(token.IDENTIFIER, "Expect a variable name.")
-	p.declareVariable()
+	p.declareVariable(name.Lexeme)
 
 	init_value := ast.Expr(ast.Literal{Value: nil})
 
@@ -352,7 +378,7 @@ func (p *Parser) block() ast.Stmt {
 	p.pushScope()
 	defer p.popScope()
 
-	return ast.MakeBlock(p.bare_block()...)
+	return ast.MakeBlock(p.bareBlock()...)
 }
 
 func (p *Parser) expressionStatement() ast.Stmt {
@@ -399,7 +425,7 @@ func (p *Parser) assignment() ast.Expr {
 }
 
 func (p *Parser) ternary() ast.Expr {
-	expr := p.logic_or()
+	expr := p.logicOr()
 
 	if p.match(token.QUESTION) {
 		true_expr := p.expression()
@@ -417,7 +443,7 @@ func (p *Parser) ternary() ast.Expr {
 }
 
 // Generic helper function for parsing left-associative binary expressions.
-func do_left_binary_expr[E ast.Binary | ast.Logical](
+func doLefBinaryExpr[E ast.Binary | ast.Logical](
 	p *Parser, next_rule func() ast.Expr, matches ...token.TokenKind) ast.Expr {
 	left := next_rule()
 
@@ -431,31 +457,31 @@ func do_left_binary_expr[E ast.Binary | ast.Logical](
 	return left
 }
 
-func (p *Parser) logic_or() ast.Expr {
-	return do_left_binary_expr[ast.Logical](p, p.logic_and, token.OR)
+func (p *Parser) logicOr() ast.Expr {
+	return doLefBinaryExpr[ast.Logical](p, p.logicAnd, token.OR)
 }
 
-func (p *Parser) logic_and() ast.Expr {
-	return do_left_binary_expr[ast.Logical](p, p.equality, token.AND)
+func (p *Parser) logicAnd() ast.Expr {
+	return doLefBinaryExpr[ast.Logical](p, p.equality, token.AND)
 }
 
 func (p *Parser) equality() ast.Expr {
-	return do_left_binary_expr[ast.Binary](p, p.comparison,
+	return doLefBinaryExpr[ast.Binary](p, p.comparison,
 		token.EQUAL_EQUAL, token.BANG_EQUAL)
 }
 
 func (p *Parser) comparison() ast.Expr {
-	return do_left_binary_expr[ast.Binary](p, p.term,
+	return doLefBinaryExpr[ast.Binary](p, p.term,
 		token.LESS, token.LESS_EQUAL, token.GREATER, token.GREATER_EQUAL)
 }
 
 func (p *Parser) term() ast.Expr {
-	return do_left_binary_expr[ast.Binary](p, p.factor,
+	return doLefBinaryExpr[ast.Binary](p, p.factor,
 		token.PLUS, token.MINUS)
 }
 
 func (p *Parser) factor() ast.Expr {
-	return do_left_binary_expr[ast.Binary](p, p.unary,
+	return doLefBinaryExpr[ast.Binary](p, p.unary,
 		token.STAR, token.SLASH)
 }
 
@@ -498,14 +524,10 @@ func (p *Parser) primary() ast.Expr {
 		return ast.Literal{Value: nil}
 
 	case p.match(token.THIS):
-		return ast.This{Keyword: p.previous}
+		return p.this()
 
 	case p.match(token.SUPER):
-		// Any usage'super' must access a method of the superclass.
-		kword := p.previous
-		p.consume(token.DOT, "Expect '.' after super.")
-		method := p.consume(token.IDENTIFIER, "Expect superclass method name.")
-		return ast.Super{Keyword: kword, Method: method}
+		return p.super()
 
 	case p.match_any(token.NUMBER, token.STRING):
 		return ast.Literal{Value: p.previous.Literal}
@@ -524,10 +546,41 @@ func (p *Parser) primary() ast.Expr {
 	panic(SyntaxError{})
 }
 
+func (p *Parser) this() ast.Expr {
+	if p.currentClass == kindNoClass {
+		p.error("Cannot use 'this' outside of a class.")
+		// Continue after the error as the syntax is well formed.
+	}
+
+	// 'this' is resolved just like any ordinary local variable, since we put
+	// it inside a scope which is enclosed by the scope of a method.
+	v := p.useVariable(p.previous)
+	return ast.This{Variable: v}
+}
+
+func (p *Parser) super() ast.Expr {
+	switch p.currentClass {
+	case kindNoClass:
+		p.error("Cannot use 'super' outside of a class.")
+	case kindClass:
+		p.error("Cannot use 'super' in a class with no superclass.")
+	}
+	// Continue after the error as the syntax is well formed.
+
+	// 'super' is resolved just like any ordinary local variable, since we put
+	// it inside a scope enclosing the scope containing 'this'.
+	v := p.useVariable(p.previous)
+	p.consume(token.DOT, "Expect '.' after super.")
+
+	// Any usage'super' must access a method of the superclass.
+	method := p.consume(token.IDENTIFIER, "Expect superclass method name.")
+	return ast.Super{Variable: v, Method: method}
+}
+
 // Parsing helpers
 // --------------------------------------------------------
 // Parses: declaration* '}', does not do scope management.
-func (p *Parser) bare_block() []ast.Stmt {
+func (p *Parser) bareBlock() []ast.Stmt {
 	stmts := make([]ast.Stmt, 0)
 
 	for !p.check(token.RIGHT_BRACE) && !p.check(token.END_OF_FILE) {
@@ -539,7 +592,7 @@ func (p *Parser) bare_block() []ast.Stmt {
 	return stmts
 }
 
-// Parses: expr? (',' expr)* ')'
+// Parses call arguments: (expr (',' expr)*)? ')'
 func (p *Parser) finish_call(callee ast.Expr) ast.Call {
 	args := make([]ast.Expr, 0)
 
@@ -574,29 +627,26 @@ func (p *Parser) popScope() {
 	util.Pop(&p.scopes)
 }
 
-// Declares the variable(last consumed token) in the current local scope.
-// Print and set error if the variable already existed in the scope.
-func (p *Parser) declareVariable() {
-	name := p.previous
-
+// Declares the variable in the current scope.
+// Print and set error if the variable was already declared in the scope.
+func (p *Parser) declareVariable(name string) {
 	// If global then do nothing
 	if len(p.scopes) == 0 {
 		return
 	}
 
-	slot, _ := util.Last(p.scopes).getVariable(name.Lexeme)
-
-	if slot < 0 {
-		util.Last(p.scopes).putVariable(name.Lexeme)
+	if slot, _ := util.Last(p.scopes).getVariable(name); slot < 0 {
+		util.Last(p.scopes).putVariable(name)
 		return
 	}
 
 	p.error(
 		"Variable with name '%v' already exists in the scope.",
-		name.Lexeme,
+		name,
 	)
 }
 
+// Marsk the last declared variable defined.
 func (p *Parser) defineVariable() {
 	// If global then do nothing
 	if len(p.scopes) == 0 {
@@ -609,7 +659,7 @@ func (p *Parser) defineVariable() {
 // Determines if the variable being referred to is global or local and
 // returns its Variable object with information to resolve it at runtime.
 func (p *Parser) useVariable(name token.Token) ast.Variable {
-	// Determine if local a variable or a global variable.
+	// Determine if a local variable or a global variable.
 	for i := range p.scopes {
 		// Reversed, inside out traversal.
 		at := len(p.scopes) - i - 1
@@ -645,6 +695,8 @@ func (p *Parser) error_at(tok token.Token, message string, args ...any) {
 	fmt.Fprintf(os.Stderr, message+"\n", args...)
 }
 
+// Synchronize the token stream after seeing malformed syntax to prevent
+// cascading errors and parse as much correct synytax as possible.
 func (p *Parser) synchronize() {
 	// Discard token on whic error happened and continue to do so until we
 	// find a token which might be the begining of a new statement/declaration.
@@ -657,7 +709,7 @@ func (p *Parser) synchronize() {
 			return
 		}
 
-		// Or if we see a token which is begining of a statement.
+		// If we see a token which is begining of a statement.
 		switch p.current.Kind {
 		case token.LEFT_BRACE, token.CLASS, token.FUN, token.VAR,
 			token.FOR, token.IF, token.WHILE,

@@ -69,11 +69,12 @@ type Set struct {
 // super, this, grouping, variable and literal are primary expressions.
 
 type Super struct {
-	Keyword, Method token.Token
+	Method   token.Token
+	Variable Variable // Always a local variable.
 }
 
 type This struct {
-	Keyword token.Token
+	Variable Variable // Always a local variable.
 }
 
 type Grouping struct {
