@@ -104,7 +104,6 @@ func (p *Parser) classDeclaration() ast.Stmt {
 
 		if sname.Lexeme == name.Lexeme {
 			p.error("A class cannot inherit from itself.")
-			// Continue after the error as the syntax is well formed.
 		} else {
 			sp := p.useVariable(sname)
 			superclass = &sp
@@ -279,6 +278,10 @@ func (p *Parser) printStatement() ast.Stmt {
 }
 
 func (p *Parser) breakStatement() ast.Stmt {
+	if p.currentLoop == kindNoLoop {
+		p.error("'break' statement outside loop.")
+	}
+
 	kw := p.previous
 	p.consume(token.SEMICOLON, "Expect ';' after 'break'.")
 
@@ -286,6 +289,10 @@ func (p *Parser) breakStatement() ast.Stmt {
 }
 
 func (p *Parser) continueStatement() ast.Stmt {
+	if p.currentLoop == kindNoLoop {
+		p.error("'continue' statement outside loop.")
+	}
+
 	kw := p.previous
 	p.consume(token.SEMICOLON, "Expect ';' after 'continue'.")
 
@@ -293,10 +300,18 @@ func (p *Parser) continueStatement() ast.Stmt {
 }
 
 func (p *Parser) returnStatement() ast.Stmt {
+	if p.currentFunction == kindNoFunction {
+		p.error("'return' statement outside function.")
+	}
+
 	kw := p.previous
 	value := ast.Expr(nil) // A return with no expression returns nil.
 
 	if !p.check(token.SEMICOLON) {
+		if p.currentFunction == kindInitializer {
+			p.error("Cannot return a value from an initializer.")
+		}
+
 		value = p.expression()
 		p.consume(token.SEMICOLON, "Expect ';' after return value.")
 	} else {
@@ -440,7 +455,6 @@ func (p *Parser) assignment() ast.Expr {
 			}
 		default:
 			p.error_at(equals, "Invalid assingment target.")
-			// Continue after the error as the syntax is well formed.
 		}
 	}
 
@@ -580,7 +594,6 @@ func (p *Parser) primary() ast.Expr {
 func (p *Parser) this() ast.Expr {
 	if p.currentClass == kindNoClass {
 		p.error("Cannot use 'this' outside of a class.")
-		// Continue after the error as the syntax is well formed.
 	}
 
 	// 'this' is resolved just like any ordinary local variable, since we put
@@ -596,7 +609,6 @@ func (p *Parser) super() ast.Expr {
 	case kindClass:
 		p.error("Cannot use 'super' in a class with no superclass.")
 	}
-	// Continue after the error as the syntax is well formed.
 
 	// 'super' is resolved just like any ordinary local variable, since we put
 	// it inside a scope enclosing the scope of the method.
@@ -634,7 +646,6 @@ func (p *Parser) finishCall(callee ast.Expr) *ast.Call {
 					"Can't have more than %v arguments.", MAX_CALL_PARAMS,
 				))
 			}
-			// Continue after the error as the syntax is well formed.
 
 			args = append(args, p.expression())
 
@@ -698,7 +709,6 @@ func (p *Parser) useVariable(name token.Token) ast.Variable {
 		if slot, def := p.scopes[at].getVariable(name.Lexeme); slot >= 0 {
 			if !def {
 				p.error_at(name, "Cannot read variable in its own initializer.")
-				// Continue after the error as the syntax is well formed.
 			}
 
 			return ast.Variable{Name: p.previous, Distance: i, Slot: slot}
