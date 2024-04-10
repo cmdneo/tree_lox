@@ -47,7 +47,7 @@ func ancestor(env *LocalEnv, distance int) *LocalEnv {
 	ret := env
 
 	for i := 0; i < distance; i++ {
-		ret = env.enclosing
+		ret = ret.enclosing
 	}
 
 	return ret
