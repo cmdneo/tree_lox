@@ -1,17 +1,22 @@
 package object
 
+import "tree_lox/value"
+
 type LocalEnv struct {
 	enclosing *LocalEnv
-	values    []any
+	values    []value.Value
 }
 
 const initialEnvSize int = 4
 
 func NewLocalEnv(enclosing *LocalEnv) *LocalEnv {
-	return &LocalEnv{values: make([]any, 0, initialEnvSize), enclosing: enclosing}
+	return &LocalEnv{
+		values:    make([]value.Value, 0, initialEnvSize),
+		enclosing: enclosing,
+	}
 }
 
-func (e *LocalEnv) PushVariable(value any) {
+func (e *LocalEnv) PushVariable(value value.Value) {
 	e.values = append(e.values, value)
 }
 
@@ -21,13 +26,13 @@ func (e *LocalEnv) PopVariable(count int) {
 
 // Return the object stored in the distance number of enclosing scopes away.
 // The variable being accessed must exist in that scope.
-func (e *LocalEnv) GetAt(slot, distance int) any {
+func (e *LocalEnv) GetAt(slot, distance int) value.Value {
 	return ancestor(e, distance).values[slot]
 }
 
 // Assign to the object stored in the distance number of enclosing scopes away.
 // The variable being accessed must exist in that scope.
-func (e *LocalEnv) AssignAt(slot int, value any, distance int) {
+func (e *LocalEnv) AssignAt(slot int, value value.Value, distance int) {
 	ancestor(e, distance).values[slot] = value
 }
 
@@ -39,7 +44,7 @@ func (e *LocalEnv) GetEnclosing() *LocalEnv {
 	return e.enclosing
 }
 
-func (e *LocalEnv) GetAllValues() []any {
+func (e *LocalEnv) GetAllValues() []value.Value {
 	return e.values
 }
 

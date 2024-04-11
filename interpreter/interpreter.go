@@ -7,11 +7,12 @@ import (
 	"tree_lox/object"
 	"tree_lox/token"
 	"tree_lox/util"
+	"tree_lox/value"
 )
 
 type Interpreter struct {
 	// Global variables
-	globals map[string]any
+	globals map[string]value.Value
 	// Local variable scopes
 	localEnv *object.LocalEnv
 	// Functions we are currently inside.
@@ -20,7 +21,7 @@ type Interpreter struct {
 	// Current stack distance from the error site.
 	errorDistance int
 	// Return value, only one function returns it value at a time.
-	returnedValue any
+	returnedValue value.Value
 }
 
 type runtimeError struct{}
@@ -32,7 +33,7 @@ type callInfo struct {
 
 func MakeInterpreter() Interpreter {
 	return Interpreter{
-		globals:  map[string]any{},
+		globals:  make(map[string]value.Value),
 		localEnv: nil,
 		// The top-level implicit function is named '<script>'.
 		calledFunctions: []string{"<script>"},
@@ -71,7 +72,7 @@ func (i *Interpreter) execute(e ast.Stmt) ast.ControlKind {
 	return e.Accept(i)
 }
 
-func (i *Interpreter) evaluate(e ast.Expr) any {
+func (i *Interpreter) evaluate(e ast.Expr) value.Value {
 	return e.Accept(i)
 }
 
@@ -87,12 +88,12 @@ func (i *Interpreter) VisitExpressionStmt(s *ast.Expression) ast.ControlKind {
 }
 
 func (i *Interpreter) VisitPrintStmt(s *ast.Print) ast.ControlKind {
-	fmt.Printf("%v\n", object.AsString(i.evaluate(s.Expression)))
+	fmt.Printf("%v\n", i.evaluate(s.Expression).String())
 	return ast.ControlLinear
 }
 
 func (i *Interpreter) VisitAssertStmt(s *ast.Assert) ast.ControlKind {
-	if !object.Truthiness(i.evaluate(s.Expression)) {
+	if !value.Truthiness(i.evaluate(s.Expression)) {
 		panic(i.makeError(s.Keyword, "Assertion failure."))
 	} else {
 		return ast.ControlLinear
@@ -108,7 +109,7 @@ func (i *Interpreter) VisitContinueStmt(s *ast.Continue) ast.ControlKind {
 }
 
 func (i *Interpreter) VisitReturnStmt(s *ast.Return) ast.ControlKind {
-	value := any(nil)
+	value := value.Value(value.Nil{})
 	if s.Value != nil {
 		value = i.evaluate(s.Value)
 	}
@@ -118,7 +119,7 @@ func (i *Interpreter) VisitReturnStmt(s *ast.Return) ast.ControlKind {
 }
 
 func (i *Interpreter) VisitIfStmt(s *ast.If) ast.ControlKind {
-	if object.Truthiness(i.evaluate(s.Condition)) {
+	if value.Truthiness(i.evaluate(s.Condition)) {
 		return i.execute(s.ThenBranch)
 	} else if s.ElseBranch != nil {
 		return i.execute(s.ElseBranch)
@@ -128,7 +129,7 @@ func (i *Interpreter) VisitIfStmt(s *ast.If) ast.ControlKind {
 }
 
 func (i *Interpreter) VisitForStmt(s *ast.For) ast.ControlKind {
-	for object.Truthiness(i.evaluate(s.Condition)) {
+	for value.Truthiness(i.evaluate(s.Condition)) {
 		flow := i.execute(s.Body)
 
 		switch flow {
@@ -210,7 +211,7 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 
 // Expression evaluators
 // --------------------------------------------------------
-func (i *Interpreter) VisitAssignExpr(e *ast.Assign) any {
+func (i *Interpreter) VisitAssignExpr(e *ast.Assign) value.Value {
 	val := i.evaluate(e.Expr)
 
 	if e.Target.Distance < 0 {
@@ -228,8 +229,8 @@ func (i *Interpreter) VisitAssignExpr(e *ast.Assign) any {
 	return val
 }
 
-func (i *Interpreter) VisitTernaryExpr(e *ast.Ternary) any {
-	truth := object.Truthiness(i.evaluate(e.Condition))
+func (i *Interpreter) VisitTernaryExpr(e *ast.Ternary) value.Value {
+	truth := value.Truthiness(i.evaluate(e.Condition))
 
 	if truth {
 		return i.evaluate(e.TrueExpr)
@@ -238,19 +239,19 @@ func (i *Interpreter) VisitTernaryExpr(e *ast.Ternary) any {
 	}
 }
 
-func (i *Interpreter) VisitLogicalExpr(e *ast.Logical) any {
+func (i *Interpreter) VisitLogicalExpr(e *ast.Logical) value.Value {
 	left := i.evaluate(e.Left)
 
 	// Return the value of the expression which determines the truth value of
 	// the logical expression and not a boolean, similar to what python does.
 	switch e.Operator.Kind {
 	case token.OR:
-		if object.Truthiness(left) {
+		if value.Truthiness(left) {
 			return left
 		}
 
 	case token.AND:
-		if !object.Truthiness(left) {
+		if !value.Truthiness(left) {
 			return left
 		}
 
@@ -269,12 +270,12 @@ func hasType[T any](a, b any) bool {
 	return e && f
 }
 
-func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) any {
+func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) value.Value {
 	left := i.evaluate(e.Left)
 	right := i.evaluate(e.Right)
 
 	check_nums := func() {
-		if hasType[float64](left, right) {
+		if hasType[value.Number](left, right) {
 			return
 		}
 		panic(i.makeError(e.Operator,
@@ -282,7 +283,8 @@ func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) any {
 	}
 
 	check_num_or_str := func() {
-		if hasType[float64](left, right) || hasType[string](left, right) {
+		if hasType[value.Number](left, right) ||
+			hasType[value.String](left, right) {
 			return
 		}
 		panic(i.makeError(e.Operator, "Operands must numbers."))
@@ -291,42 +293,42 @@ func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) any {
 	switch e.Operator.Kind {
 	case token.PLUS:
 		check_num_or_str()
-		return object.Add(left, right)
+		return value.Add(left, right)
 	case token.MINUS:
 		check_nums()
-		return object.Sub(left, right)
+		return value.Sub(left, right)
 	case token.STAR:
 		check_nums()
-		return object.Mul(left, right)
+		return value.Mul(left, right)
 	case token.SLASH:
 		check_nums()
-		return object.Div(left, right)
+		return value.Div(left, right)
 
 	case token.GREATER:
 		check_num_or_str()
-		return object.GreaterThan(left, right)
+		return value.GreaterThan(left, right)
 	case token.GREATER_EQUAL:
 		check_num_or_str()
-		return object.GreaterThan(left, right) || object.EqualTo(left, right)
+		return value.GreaterThan(left, right) || value.EqualTo(left, right)
 
 	case token.LESS:
 		check_num_or_str()
-		return object.LessThan(left, right)
+		return value.LessThan(left, right)
 	case token.LESS_EQUAL:
 		check_num_or_str()
-		return object.LessThan(left, right) || object.EqualTo(left, right)
+		return value.LessThan(left, right) || value.EqualTo(left, right)
 
 	case token.EQUAL_EQUAL:
-		return object.EqualTo(left, right)
+		return value.EqualTo(left, right)
 	case token.BANG_EQUAL:
-		return !object.EqualTo(left, right)
+		return !value.EqualTo(left, right)
 
 	default:
 		panic("Invalid operator token in binary expression.")
 	}
 }
 
-func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) any {
+func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) value.Value {
 	right := i.evaluate(e.Right)
 
 	check_num := func() {
@@ -338,25 +340,25 @@ func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) any {
 
 	switch e.Operator.Kind {
 	case token.BANG:
-		return !object.Truthiness(right)
+		return !value.Truthiness(right)
 
 	case token.PLUS:
 		check_num()
 		return right
 	case token.MINUS:
 		check_num()
-		return object.Neg(right)
+		return value.Neg(right)
 
 	default:
 		panic("Invalid operator token in unary expression.")
 	}
 }
 
-func (i *Interpreter) VisitCallExpr(e *ast.Call) any {
+func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 	return i.performCall(e)
 }
 
-func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
+func (i *Interpreter) VisitGetExpr(e *ast.Get) value.Value {
 	if obj, ok := i.evaluate(e.Object).(*object.Instance); ok {
 		if val, ok := obj.Get(e.Name.Lexeme); ok {
 			return val
@@ -368,7 +370,7 @@ func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
 	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
-func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
+func (i *Interpreter) VisitSetExpr(e *ast.Set) value.Value {
 	if instance, ok := i.evaluate(e.Object).(*object.Instance); ok {
 		val := i.evaluate(e.Value)
 		instance.Set(e.Name.Lexeme, val)
@@ -378,7 +380,7 @@ func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
 	panic(i.makeError(e.Name, "Only instances have fields."))
 }
 
-func (i *Interpreter) VisitSuperExpr(e *ast.Super) any {
+func (i *Interpreter) VisitSuperExpr(e *ast.Super) value.Value {
 	// 'super' is guranteed to be a class.
 	super, ok := i.resolveVariable(&e.Variable).(*object.Class)
 	if !ok {
@@ -386,25 +388,25 @@ func (i *Interpreter) VisitSuperExpr(e *ast.Super) any {
 	}
 
 	if method := super.Get(e.Method.Lexeme); method != nil {
-		return *method
+		return method
 	}
 
 	panic(i.makeError(e.Method, "Undefined property '%v'.", e.Method.Lexeme))
 }
 
-func (i *Interpreter) VisitThisExpr(e *ast.This) any {
+func (i *Interpreter) VisitThisExpr(e *ast.This) value.Value {
 	return i.resolveVariable(&e.Variable)
 }
 
-func (i *Interpreter) VisitGroupingExpr(e *ast.Grouping) any {
+func (i *Interpreter) VisitGroupingExpr(e *ast.Grouping) value.Value {
 	return i.evaluate(e.Expr)
 }
 
-func (i *Interpreter) VisitLiteralExpr(e *ast.Literal) any {
+func (i *Interpreter) VisitLiteralExpr(e *ast.Literal) value.Value {
 	return e.Value
 }
 
-func (i *Interpreter) VisitVariableExpr(e *ast.Variable) any {
+func (i *Interpreter) VisitVariableExpr(e *ast.Variable) value.Value {
 	return i.resolveVariable(e)
 }
 
@@ -446,7 +448,7 @@ func (i *Interpreter) executeBlock(
 }
 
 // Performs call and returns the return value.
-func (i *Interpreter) performCall(e *ast.Call) any {
+func (i *Interpreter) performCall(e *ast.Call) value.Value {
 	callee := i.evaluate(e.Callee)
 	arity, name, ok := getCallableInfo(callee)
 
@@ -477,7 +479,7 @@ func (i *Interpreter) performCall(e *ast.Call) any {
 	case *object.Class:
 		// Create the instance
 		instance := &object.Instance{
-			Fields: map[string]any{},
+			Fields: make(map[string]value.Value),
 			Class:  obj,
 		}
 
@@ -504,7 +506,7 @@ func (i *Interpreter) performCall(e *ast.Call) any {
 }
 
 // Defines a variable in the current scope(can be local or global).
-func (i *Interpreter) defineVariable(name string, value any) {
+func (i *Interpreter) defineVariable(name string, value value.Value) {
 	if i.localEnv == nil {
 		i.globals[name] = value // Global
 	} else {
@@ -514,7 +516,7 @@ func (i *Interpreter) defineVariable(name string, value any) {
 }
 
 // Returns the value of the variable.
-func (i *Interpreter) resolveVariable(v *ast.Variable) any {
+func (i *Interpreter) resolveVariable(v *ast.Variable) value.Value {
 	// If global variable
 	if v.Distance < 0 {
 		if value, ok := i.globals[v.Name.Lexeme]; ok {

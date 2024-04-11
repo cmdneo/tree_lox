@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"tree_lox/token"
+	"tree_lox/value"
 )
 
 const EOF_CHAR = '\x00'
@@ -113,7 +114,7 @@ func (s *Scanner) do_string() token.Token {
 	for !s.isAtEnd() {
 		if s.advance() == '"' {
 			tok := s.makeTok(token.STRING)
-			tok.Literal = s.source[s.start+1 : s.current-1]
+			tok.Literal = value.String(s.source[s.start+1 : s.current-1])
 			return tok
 		}
 	}
@@ -141,7 +142,7 @@ func (s *Scanner) do_number() token.Token {
 		return s.errorTok(fmt.Sprintf("Invalid number (%v)", err.Error()))
 	}
 
-	tok.Literal = val
+	tok.Literal = value.Number(val)
 	return tok
 }
 

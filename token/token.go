@@ -1,10 +1,12 @@
 package token
 
+import "tree_lox/value"
+
 type Token struct {
 	Lexeme  string
 	Kind    TokenKind
 	Line    int
-	Literal any
+	Literal value.Value
 }
 
 //go:generate stringer -type=TokenKind

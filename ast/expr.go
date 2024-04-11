@@ -2,26 +2,27 @@ package ast
 
 import (
 	"tree_lox/token"
+	"tree_lox/value"
 )
 
 type Expr interface {
-	Accept(ExprVisitor) any
+	Accept(ExprVisitor) value.Value
 }
 
 type ExprVisitor interface {
-	VisitAssignExpr(e *Assign) any
-	VisitTernaryExpr(e *Ternary) any
-	VisitLogicalExpr(e *Logical) any
-	VisitBinaryExpr(e *Binary) any
-	VisitUnaryExpr(e *Unary) any
-	VisitCallExpr(e *Call) any
-	VisitGetExpr(e *Get) any
-	VisitSetExpr(e *Set) any
-	VisitSuperExpr(e *Super) any
-	VisitThisExpr(e *This) any
-	VisitGroupingExpr(e *Grouping) any
-	VisitLiteralExpr(e *Literal) any
-	VisitVariableExpr(e *Variable) any
+	VisitAssignExpr(e *Assign) value.Value
+	VisitTernaryExpr(e *Ternary) value.Value
+	VisitLogicalExpr(e *Logical) value.Value
+	VisitBinaryExpr(e *Binary) value.Value
+	VisitUnaryExpr(e *Unary) value.Value
+	VisitCallExpr(e *Call) value.Value
+	VisitGetExpr(e *Get) value.Value
+	VisitSetExpr(e *Set) value.Value
+	VisitSuperExpr(e *Super) value.Value
+	VisitThisExpr(e *This) value.Value
+	VisitGroupingExpr(e *Grouping) value.Value
+	VisitLiteralExpr(e *Literal) value.Value
+	VisitVariableExpr(e *Variable) value.Value
 }
 
 type Assign struct {
@@ -90,20 +91,20 @@ type Variable struct {
 }
 
 type Literal struct {
-	Value any
+	Value value.Value
 }
 
 // Implement the Expr interface for each expression type we have.
-func (e *Assign) Accept(v ExprVisitor) any   { return v.VisitAssignExpr(e) }
-func (e *Ternary) Accept(v ExprVisitor) any  { return v.VisitTernaryExpr(e) }
-func (e *Logical) Accept(v ExprVisitor) any  { return v.VisitLogicalExpr(e) }
-func (e *Binary) Accept(v ExprVisitor) any   { return v.VisitBinaryExpr(e) }
-func (e *Unary) Accept(v ExprVisitor) any    { return v.VisitUnaryExpr(e) }
-func (e *Call) Accept(v ExprVisitor) any     { return v.VisitCallExpr(e) }
-func (e *Get) Accept(v ExprVisitor) any      { return v.VisitGetExpr(e) }
-func (e *Set) Accept(v ExprVisitor) any      { return v.VisitSetExpr(e) }
-func (e *Super) Accept(v ExprVisitor) any    { return v.VisitSuperExpr(e) }
-func (e *This) Accept(v ExprVisitor) any     { return v.VisitThisExpr(e) }
-func (e *Grouping) Accept(v ExprVisitor) any { return v.VisitGroupingExpr(e) }
-func (e *Literal) Accept(v ExprVisitor) any  { return v.VisitLiteralExpr(e) }
-func (e *Variable) Accept(v ExprVisitor) any { return v.VisitVariableExpr(e) }
+func (e *Assign) Accept(v ExprVisitor) value.Value   { return v.VisitAssignExpr(e) }
+func (e *Ternary) Accept(v ExprVisitor) value.Value  { return v.VisitTernaryExpr(e) }
+func (e *Logical) Accept(v ExprVisitor) value.Value  { return v.VisitLogicalExpr(e) }
+func (e *Binary) Accept(v ExprVisitor) value.Value   { return v.VisitBinaryExpr(e) }
+func (e *Unary) Accept(v ExprVisitor) value.Value    { return v.VisitUnaryExpr(e) }
+func (e *Call) Accept(v ExprVisitor) value.Value     { return v.VisitCallExpr(e) }
+func (e *Get) Accept(v ExprVisitor) value.Value      { return v.VisitGetExpr(e) }
+func (e *Set) Accept(v ExprVisitor) value.Value      { return v.VisitSetExpr(e) }
+func (e *Super) Accept(v ExprVisitor) value.Value    { return v.VisitSuperExpr(e) }
+func (e *This) Accept(v ExprVisitor) value.Value     { return v.VisitThisExpr(e) }
+func (e *Grouping) Accept(v ExprVisitor) value.Value { return v.VisitGroupingExpr(e) }
+func (e *Literal) Accept(v ExprVisitor) value.Value  { return v.VisitLiteralExpr(e) }
+func (e *Variable) Accept(v ExprVisitor) value.Value { return v.VisitVariableExpr(e) }

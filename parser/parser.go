@@ -6,6 +6,7 @@ import (
 	"tree_lox/ast"
 	"tree_lox/token"
 	"tree_lox/util"
+	"tree_lox/value"
 )
 
 const MAX_CALL_PARAMS = 255
@@ -100,13 +101,11 @@ func (p *Parser) classDeclaration() ast.Stmt {
 	// Check and set if superclass exists.
 	superclass := (*ast.Variable)(nil)
 	if p.match(token.LESS) {
-		sname := p.consume(token.IDENTIFIER, "Expect superclass name.")
+		p.consume(token.IDENTIFIER, "Expect superclass name.")
+		superclass = p.useVariable()
 
-		if sname.Lexeme == name.Lexeme {
+		if superclass.Name.Lexeme == name.Lexeme {
 			p.error("A class cannot inherit from itself.")
-		} else {
-			sp := p.useVariable(sname)
-			superclass = &sp
 		}
 	}
 
@@ -383,7 +382,7 @@ func (p *Parser) forStatement() ast.Stmt {
 	}
 
 	// If condition is empty it it true by default.
-	cond := ast.Expr(&ast.Literal{Value: true})
+	cond := ast.Expr(&ast.Literal{Value: value.Boolean(true)})
 	if !p.check(token.SEMICOLON) {
 		cond = p.expression()
 	}
@@ -561,11 +560,11 @@ func (p *Parser) call() ast.Expr {
 func (p *Parser) primary() ast.Expr {
 	switch {
 	case p.match(token.FALSE):
-		return &ast.Literal{Value: false}
+		return &ast.Literal{Value: value.Boolean(false)}
 	case p.match(token.TRUE):
-		return &ast.Literal{Value: true}
+		return &ast.Literal{Value: value.Boolean(true)}
 	case p.match(token.NIL):
-		return &ast.Literal{Value: nil}
+		return &ast.Literal{Value: value.Nil{}}
 
 	case p.match(token.THIS):
 		return p.this()
@@ -577,8 +576,7 @@ func (p *Parser) primary() ast.Expr {
 		return &ast.Literal{Value: p.previous.Literal}
 
 	case p.match(token.IDENTIFIER):
-		tmp := p.useVariable(p.previous)
-		return &tmp
+		return p.useVariable()
 
 	case p.match(token.LEFT_PAREN):
 		expr := p.expression()
@@ -598,8 +596,8 @@ func (p *Parser) this() ast.Expr {
 
 	// 'this' is resolved just like any ordinary local variable, since we put
 	// it inside a scope which encloses the scope of a method.
-	v := p.useVariable(p.previous)
-	return &ast.This{Variable: v}
+	v := p.useVariable()
+	return &ast.This{Variable: *v}
 }
 
 func (p *Parser) super() ast.Expr {
@@ -612,12 +610,12 @@ func (p *Parser) super() ast.Expr {
 
 	// 'super' is resolved just like any ordinary local variable, since we put
 	// it inside a scope enclosing the scope of the method.
-	v := p.useVariable(p.previous)
+	v := p.useVariable()
 	p.consume(token.DOT, "Expect '.' after super.")
 
 	// Any usage'super' must access a method of the superclass.
 	method := p.consume(token.IDENTIFIER, "Expect superclass method name.")
-	return &ast.Super{Variable: v, Method: method}
+	return &ast.Super{Variable: *v, Method: method}
 }
 
 // Parsing helpers
@@ -698,24 +696,24 @@ func (p *Parser) defineVariable() {
 	util.Last(p.scopes).markDefined()
 }
 
-// Determines if the variable being referred to is global or local and
+// Determines if the variable being referred to by the p.previous token and
 // returns its Variable object with information to resolve it at runtime.
-func (p *Parser) useVariable(name token.Token) ast.Variable {
+func (p *Parser) useVariable() *ast.Variable {
 	// Determine if a local variable or a global variable.
 	for i := range p.scopes {
 		// Reversed, inside out traversal.
 		at := len(p.scopes) - i - 1
 
-		if slot, def := p.scopes[at].getVariable(name.Lexeme); slot >= 0 {
+		if slot, def := p.scopes[at].getVariable(p.previous.Lexeme); slot >= 0 {
 			if !def {
-				p.error_at(name, "Cannot read variable in its own initializer.")
+				p.error_at(p.previous, "Cannot read variable in its own initializer.")
 			}
 
-			return ast.Variable{Name: p.previous, Distance: i, Slot: slot}
+			return &ast.Variable{Name: p.previous, Distance: i, Slot: slot}
 		}
 	}
 
-	return ast.Variable{Name: p.previous, Distance: -1, Slot: -1}
+	return &ast.Variable{Name: p.previous, Distance: -1, Slot: -1}
 }
 
 // Error reporting and recovery methods
