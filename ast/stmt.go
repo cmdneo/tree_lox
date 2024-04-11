@@ -86,7 +86,7 @@ type Function struct {
 type Class struct {
 	Name       token.Token
 	Superclass *Variable // Can be nil
-	// FIXME Store pointer or just copy it??
+	// Store a pointer to the function declaration, since we .
 	Methods map[string]*Function
 }
 

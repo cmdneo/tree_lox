@@ -29,15 +29,16 @@ func (f *Function) Arity() int {
 	return len(f.Declaration.Params)
 }
 
-func (f *Function) bind(instance *Instance) Function {
+// Creates a new function and binds it to the instance.
+func (f *Function) newBind(instance *Instance) *Function {
 	// Put the instance in a new scope enclosed by the scope which
 	// previously enclosed the function's scope.
 	// This way we can bind the instance to the function accessed, thus
 	// making the function a bound method.
 	env := NewLocalEnv(f.Enclosing)
-	env.PushVariable(*instance) // add 'this'.
+	env.PushVariable(instance) // add 'this'.
 
-	return Function{Declaration: f.Declaration, Enclosing: env}
+	return &Function{Declaration: f.Declaration, Enclosing: env}
 }
 
 // Lox native function object
@@ -56,7 +57,7 @@ func (n *NativeFunction) Arity() int {
 // --------------------------------------------------------
 type Class struct {
 	Name string
-	// FIXME Store function as pointer or value??
+	// Store the function object by value since it is only 2-ptr + 1-bool.
 	Methods    map[string]Function
 	Superclass *Class // Can be nil
 }
@@ -83,7 +84,7 @@ func (c *Class) Get(name string) *Function {
 // --------------------------------------------------------
 type Instance struct {
 	Fields map[string]any
-	Class  Class
+	Class  *Class
 }
 
 func (i *Instance) Get(name string) (any, bool) {
@@ -92,7 +93,7 @@ func (i *Instance) Get(name string) (any, bool) {
 		return value, true
 	} else if method := i.Class.Get(name); method != nil {
 		// Puts 'this' so that the method can access it.
-		return method.bind(i), true
+		return method.newBind(i), true
 	} else {
 		return nil, false
 	}
@@ -252,13 +253,13 @@ func AsString(s any) string {
 	case float64:
 		return strconv.FormatFloat(v, 'f', -1, 64)
 
-	case Function:
+	case *Function:
 		return fmt.Sprintf("<fn %v>", v.Declaration.Name.Lexeme)
 
-	case Class:
+	case *Class:
 		return fmt.Sprintf("<class %v>", v.Name)
 
-	case Instance:
+	case *Instance:
 		return fmt.Sprintf("<instance of %v>", v.Class.Name)
 	}
 

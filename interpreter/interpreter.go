@@ -155,7 +155,7 @@ func (i *Interpreter) VisitVarStmt(s *ast.Var) ast.ControlKind {
 
 func (i *Interpreter) VisitFunctionStmt(s *ast.Function) ast.ControlKind {
 	fun := object.Function{Declaration: s, Enclosing: i.localEnv}
-	i.defineVariable(s.Name.Lexeme, fun)
+	i.defineVariable(s.Name.Lexeme, &fun)
 
 	return ast.ControlLinear
 }
@@ -164,8 +164,8 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 	superclass := (*object.Class)(nil)
 
 	if s.Superclass != nil {
-		if class, ok := i.evaluate(s.Superclass).(object.Class); ok {
-			superclass = &class
+		if class, ok := i.evaluate(s.Superclass).(*object.Class); ok {
+			superclass = class
 		} else {
 			panic(i.makeError(s.Superclass.Name, "Superclass must be a class."))
 		}
@@ -177,34 +177,18 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 	// INFO: This environment will enclose the environments of all the methods.
 	if superclass != nil {
 		i.localEnv = object.NewLocalEnv(i.localEnv)
-		i.defineVariable("super", *superclass)
+		i.defineVariable("super", superclass)
 	}
 
 	// The environment containing 'this' is created per instance per method
 	// access, not here, since it is different for each instance.
 	methodMap := map[string]object.Function{}
+
 	for name, fun := range s.Methods {
 		methodMap[name] = object.Function{
 			Declaration: fun,
 			Enclosing:   i.localEnv,
-			IsInit:      fun.Name.Lexeme == "init",
-		}
-	}
-
-	// If the class does not have an initializer then we add a default one
-	// with empty body and no parameters. This eliminates the special case
-	// of a class not having an initializer/constructor.
-	if _, ok := methodMap["init"]; !ok {
-		initFn := ast.Function{
-			Name:   token.Token{Lexeme: "init"},
-			Params: []token.Token{},
-			Body:   []ast.Stmt{},
-		}
-
-		methodMap["init"] = object.Function{
-			Declaration: &initFn,
-			Enclosing:   i.localEnv,
-			IsInit:      true,
+			IsInit:      name == "init",
 		}
 	}
 
@@ -219,7 +203,7 @@ func (i *Interpreter) VisitClassStmt(s *ast.Class) ast.ControlKind {
 		Methods:    methodMap,
 		Superclass: superclass,
 	}
-	i.defineVariable(class.Name, class)
+	i.defineVariable(class.Name, &class)
 
 	return ast.ControlLinear
 }
@@ -369,14 +353,11 @@ func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) any {
 }
 
 func (i *Interpreter) VisitCallExpr(e *ast.Call) any {
-	// _ = i.evaluate(e.Callee)
-
-	i.performCall(e)
-	return i.returnedValue
+	return i.performCall(e)
 }
 
 func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
-	if obj, ok := i.evaluate(e.Object).(object.Instance); ok {
+	if obj, ok := i.evaluate(e.Object).(*object.Instance); ok {
 		if val, ok := obj.Get(e.Name.Lexeme); ok {
 			return val
 		}
@@ -388,7 +369,7 @@ func (i *Interpreter) VisitGetExpr(e *ast.Get) any {
 }
 
 func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
-	if instance, ok := i.evaluate(e.Object).(object.Instance); ok {
+	if instance, ok := i.evaluate(e.Object).(*object.Instance); ok {
 		val := i.evaluate(e.Value)
 		instance.Set(e.Name.Lexeme, val)
 		return val
@@ -399,7 +380,7 @@ func (i *Interpreter) VisitSetExpr(e *ast.Set) any {
 
 func (i *Interpreter) VisitSuperExpr(e *ast.Super) any {
 	// 'super' is guranteed to be a class.
-	super, ok := i.resolveVariable(&e.Variable).(object.Class)
+	super, ok := i.resolveVariable(&e.Variable).(*object.Class)
 	if !ok {
 		panic("'super' is not a class")
 	}
@@ -493,25 +474,28 @@ func (i *Interpreter) performCall(e *ast.Call) any {
 
 	// TODO improve this garbage!
 	switch obj := callee.(type) {
-	case object.Class:
-		// 'init' method is always present in a class, see VisitClassStmt.
-		instance := object.Instance{Fields: map[string]any{}, Class: obj}
-		init, ok := instance.Get("init")
-		if !ok {
-			panic("'init' method should always exist.")
+	case *object.Class:
+		// Create the instance
+		instance := &object.Instance{
+			Fields: map[string]any{},
+			Class:  obj,
 		}
 
-		fun := init.(object.Function)
-		fun_env.SetEnclosing(fun.Enclosing)
-		i.executeBlock(fun.Declaration.Body, fun_env)
+		if init, ok := instance.Get("init"); ok {
+			// Since the instance is blank the "init" must be a function.
+			fun := init.(*object.Function)
+			fun_env.SetEnclosing(fun.Enclosing)
+			i.executeBlock(fun.Declaration.Body, fun_env)
+		}
+
 		return instance
 
-	case object.Function:
+	case *object.Function:
 		fun_env.SetEnclosing(obj.Enclosing)
 		i.executeBlock(obj.Declaration.Body, fun_env)
 		return i.returnedValue
 
-	case object.NativeFunction:
+	case *object.NativeFunction:
 		return obj.Function(fun_env.GetAllValues()...)
 
 	default:
@@ -556,15 +540,15 @@ func getCallableInfo(callable any) (int, string, bool) {
 	name := ""
 
 	switch obj := callable.(type) {
-	case object.Class:
+	case *object.Class:
 		arity = obj.Arity()
 		name = obj.Name
 
-	case object.Function:
+	case *object.Function:
 		arity = obj.Arity()
 		name = obj.Declaration.Name.Lexeme
 
-	case object.NativeFunction:
+	case *object.NativeFunction:
 		arity = obj.Arity()
 		name = obj.Name
 
