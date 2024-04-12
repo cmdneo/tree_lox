@@ -17,6 +17,20 @@ Additional features
  - `break` and `continue` statements
  - `assert` statement
 
+
+Built-in Functions
+------------------
+ - `clock()`: Returns the time since **January 1 1970, 00:00:00** (UNIX-epoch) in seconds
+ - `sleep(<time-in-seconds>)`: Pause execution of the script for the given time
+ - `string(<value>)`: Convert a Lox object to its string representation
+ - `len(<string>)`: Calculate the length of a string in bytes
+ - `instanceof(<instance>, <class>)`: Check whether an instance is of a specific class.
+ - `hasattr(<instance>, <name>)`,
+ - `getattr(<instance>, <name>)`,
+ - `delattr(<instance>, <name>)` and
+ - `setattr(<instance>, <name>, <value>)`: Functions for manipulating instance attributes
+
+
 Examples
 --------
 ### Fibonacci numbers
@@ -31,3 +45,11 @@ for (var i = 0; i < 20; i = i + 1) {
 }
 ```
 
+
+Building
+--------
+From the project root directory run:
+
+```bash
+go build
+```
