@@ -8,7 +8,10 @@ import (
 
 var NativeFunctionsList []*NativeFunction = []*NativeFunction{
 	{"clock", 0, clock},
-	{"string", 1, tostring},
+	{"sleep", 1, sleep},
+	{"string", 1, string_},
+	{"len", 1, len_},
+	{"hasattr", 2, hasattr},
 	{"getattr", 2, getattr},
 	{"setattr", 3, setattr},
 	{"delattr", 2, delattr},
@@ -39,7 +42,6 @@ func (n *NativeFunction) Call(args []value.Value) value.Value {
 	// Arity is verified by the interpreter, so crash on a mismatch here.
 	if len(args) != n.Arity() {
 		panic("Got wrong number of arguments in native function.")
-
 	}
 
 	return n.Function(args)
@@ -61,20 +63,45 @@ func makeNativeError(format string, args ...any) NativeError {
 
 // Native functions
 // --------------------------------------------------------
-
 func clock(args []value.Value) value.Value {
 	return value.Number(time.Now().UnixMilli()) / 1000.0
 }
 
-func tostring(args []value.Value) value.Value {
+func sleep(args []value.Value) value.Value {
+	seconds := extractArg[value.Number](args[0],
+		"First argument should be a number.")
+
+	nanos := time.Duration(seconds * 1e9)
+	time.Sleep(nanos)
+	return value.Nil{}
+}
+
+func len_(args []value.Value) value.Value {
+	str := extractArg[value.String](args[0],
+		"First argument should be a string.")
+
+	return value.Number(len(str))
+}
+
+func string_(args []value.Value) value.Value {
 	return value.String(args[0].String())
+}
+
+func hasattr(args []value.Value) value.Value {
+	instance := extractArg[*Instance](args[0],
+		"First argument should be an instance.")
+	field := extractArg[value.String](args[1],
+		"Second argument should be a field name.")
+
+	_, ok := instance.Get(string(field))
+	return value.Boolean(ok)
 }
 
 func getattr(args []value.Value) value.Value {
 	instance := extractArg[*Instance](args[0],
-		"First argument to 'getattr' should be an instance.")
+		"First argument should be an instance.")
 	field := extractArg[value.String](args[1],
-		"Second argument to 'getattr' should be a field name.")
+		"Second argument should be a field name.")
 
 	if v, ok := instance.Get(string(field)); ok {
 		return v
@@ -85,9 +112,9 @@ func getattr(args []value.Value) value.Value {
 
 func setattr(args []value.Value) value.Value {
 	instance := extractArg[*Instance](args[0],
-		"First argument to 'setattr' should be an instance.")
+		"First argument should be an instance.")
 	field := extractArg[value.String](args[1],
-		"Second argument to 'setattr' should be a field name.")
+		"Second argument should be a field name.")
 	val := args[0]
 
 	instance.Set(string(field), val)
@@ -96,9 +123,9 @@ func setattr(args []value.Value) value.Value {
 
 func delattr(args []value.Value) value.Value {
 	instance := extractArg[*Instance](args[0],
-		"First argument to 'delattr' should be an instance.")
+		"First argument should be an instance.")
 	field := extractArg[value.String](args[1],
-		"Second argument to 'delattr' should be a field name.")
+		"Second argument should be a field name.")
 
 	if _, ok := instance.Fields[string(field)]; ok {
 		delete(instance.Fields, string(field))
@@ -111,9 +138,9 @@ func delattr(args []value.Value) value.Value {
 
 func isinstance(args []value.Value) value.Value {
 	instance := extractArg[*Instance](args[0],
-		"First argument to 'isinstance' should be an instance.")
-	class := extractArg[*Class](args[0],
-		"Second argument to 'isinstance' should be a class.")
+		"First argument should be an instance.")
+	class := extractArg[*Class](args[1],
+		"Second argument should be a class.")
 
 	return value.Boolean(instance.Class == class)
 }

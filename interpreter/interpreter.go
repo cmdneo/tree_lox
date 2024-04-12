@@ -392,11 +392,31 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 		))
 	}
 
+	// A native function call does not count towards call stack. So call it
+	// witout pushing any callInfo and just return the value.
+	if nfn, ok := callee.(*object.NativeFunction); ok {
+		// For handling native error.
+		defer func() {
+			switch v := recover().(type) {
+			case nil:
+			case object.NativeError:
+				panic(i.makeError(
+					e.Paren, "Error in native-function '%v': %v",
+					name, v.Error(),
+				))
+			default:
+				panic(v)
+			}
+		}()
+
+		return nfn.Call(fun_env.GetAllValues())
+	}
+
 	// Push the call ifno for stack trace generation.
 	call_info := callInfo{Line: e.Paren.Line, Name: name}
 	i.calledFunctions = append(i.calledFunctions, call_info)
 
-	// Perform the call
+	// Perform the call for class and function types
 	switch callable := callee.(type) {
 	case *object.Class:
 		instance := object.NewInstance(callable)
@@ -414,16 +434,11 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 		// Return value will be set by the return statement(if any) executed.
 		i.executeBlock(callable.Declaration.Body, fun_env)
 
-	case *object.NativeFunction:
-		i.returnedValue = callable.Call(fun_env.GetAllValues())
-
 	default:
 		panic("Attempt to call a non-callable object.")
 	}
 
-	// Pop the call info, here we don't use a defer to pop it at end.
-	// Because, on an error(as a panic on RuntimeError) this needs to be
-	// preserved for stack trace generation.
+	// Pop the call info.
 	util.Pop(&i.calledFunctions)
 
 	return i.returnedValue
