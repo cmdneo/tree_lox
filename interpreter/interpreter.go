@@ -430,6 +430,7 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 	util.Last(i.calledFunctions).DescendLine = e.Paren.Line
 	// Push the call ifno for stack trace generation.
 	i.calledFunctions = append(i.calledFunctions, callInfo{Name: name})
+	defer util.Pop(&i.calledFunctions)
 
 	// Perform the call for class and function types
 	switch callable := callee.(type) {
@@ -452,9 +453,6 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 	default:
 		panic("Attempt to call a non-callable object.")
 	}
-
-	// Pop the call info.
-	util.Pop(&i.calledFunctions)
 
 	return i.returnedValue
 }
@@ -517,20 +515,16 @@ func (i *Interpreter) VisitVariableExpr(e *ast.Variable) value.Value {
 func (i *Interpreter) makeError(
 	tok token.Token, format string, args ...any,
 ) runtimeError {
-	// Set location in the current function to as provided
+	// Set location in the current function to as provided.
 	util.Last(i.calledFunctions).DescendLine = tok.Line
 
 	// Print the message...
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
 
-	// Print stack trace
-	distance := 0
-	for len(i.calledFunctions) > 0 {
-		frame := *util.Last(i.calledFunctions)
-		printLocation(distance, frame.DescendLine, frame.Name)
-
-		util.Pop(&i.calledFunctions)
-		distance++
+	// Most recent call is printed first, last is the top-level.
+	for d := range i.calledFunctions {
+		frame := i.calledFunctions[len(i.calledFunctions)-1-d] // reversed
+		printLocation(d, frame.DescendLine, frame.Name)
 	}
 
 	i.hadError = true
