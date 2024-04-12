@@ -25,8 +25,11 @@ type Interpreter struct {
 
 // Call info for generating stack traces
 type callInfo struct {
+	// Function name
 	Name string
-	Line int
+	// Line number from where a call was made inside this function.
+	// Update this when a new function is called.
+	DescendLine int
 }
 
 type runtimeError struct{}
@@ -65,7 +68,8 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 
 	// Discard all previous local environments (if any) left due to errors.
 	i.localEnv = nil
-	i.calledFunctions = []callInfo{{Line: 0, Name: "<script>"}}
+	// The top-level code is assumend to be an implicit function named '<script>'.
+	i.calledFunctions = []callInfo{{Name: "<script>"}}
 
 	for _, stmt := range statements {
 		i.execute(stmt)
@@ -384,7 +388,7 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 	}
 
 	// Enforce a maximum call depth before starting the call but after
-	// evaliating the arguments. The before and after is completely arbtriary.
+	// evaluating its arguments. The before and after is completely arbtriary
 	if len(i.calledFunctions) == maxCallDepth {
 		panic(i.makeError(
 			e.Paren, "Max call depth %v reached.",
@@ -393,7 +397,7 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 	}
 
 	// A native function call does not count towards call stack. So call it
-	// witout pushing any callInfo and just return the value.
+	// witout pushing any callInfo and just return the return value.
 	if nfn, ok := callee.(*object.NativeFunction); ok {
 		// For handling native error.
 		defer func() {
@@ -412,9 +416,11 @@ func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
 		return nfn.Call(fun_env.GetAllValues())
 	}
 
+	// Update the line number in previous function from where it
+	// called this function(or callable).
+	util.Last(i.calledFunctions).DescendLine = e.Paren.Line
 	// Push the call ifno for stack trace generation.
-	call_info := callInfo{Line: e.Paren.Line, Name: name}
-	i.calledFunctions = append(i.calledFunctions, call_info)
+	i.calledFunctions = append(i.calledFunctions, callInfo{Name: name})
 
 	// Perform the call for class and function types
 	switch callable := callee.(type) {
@@ -503,7 +509,7 @@ func (i *Interpreter) makeError(
 	tok token.Token, format string, args ...any,
 ) runtimeError {
 	// Set location in the current function to as provided
-	util.Last(i.calledFunctions).Line = tok.Line
+	util.Last(i.calledFunctions).DescendLine = tok.Line
 
 	// Print the message...
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
@@ -512,7 +518,7 @@ func (i *Interpreter) makeError(
 	distance := 0
 	for len(i.calledFunctions) > 0 {
 		frame := *util.Last(i.calledFunctions)
-		printLocation(distance, frame.Line, frame.Name)
+		printLocation(distance, frame.DescendLine, frame.Name)
 
 		util.Pop(&i.calledFunctions)
 		distance++
