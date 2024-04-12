@@ -21,6 +21,8 @@ type Interpreter struct {
 	calledFunctions []callInfo
 	// Return value, only one function returns it value at a time.
 	returnedValue value.Value
+	// Tracks if had error
+	hadError bool
 }
 
 // Call info for generating stack traces
@@ -51,10 +53,14 @@ func MakeInterpreter() Interpreter {
 		globals:         globals,
 		localEnv:        nil,
 		calledFunctions: []callInfo{},
+		returnedValue:   value.Nil{},
+		hadError:        false,
 	}
 }
 
-func (i *Interpreter) Interpret(statements []ast.Stmt) {
+// Interpret the code. Return true if no runtime error occured
+// and false if any runtime error occured.
+func (i *Interpreter) Interpret(statements []ast.Stmt) bool {
 	defer func() {
 		switch err := recover().(type) {
 		case nil:
@@ -66,6 +72,7 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 		}
 	}()
 
+	i.hadError = false
 	// Discard all previous local environments (if any) left due to errors.
 	i.localEnv = nil
 	// The top-level code is assumend to be an implicit function named '<script>'.
@@ -74,6 +81,8 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 	for _, stmt := range statements {
 		i.execute(stmt)
 	}
+
+	return !i.hadError
 }
 
 // Wrapper methods which pass in the interpreter as a
@@ -524,6 +533,7 @@ func (i *Interpreter) makeError(
 		distance++
 	}
 
+	i.hadError = true
 	return runtimeError{}
 }
 

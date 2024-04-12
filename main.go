@@ -53,7 +53,9 @@ func execFromFile(filepath string) {
 		os.Exit(1)
 	}
 
-	lox_interpreter.Interpret(stmts)
+	if !lox_interpreter.Interpret(stmts) {
+		os.Exit(1)
+	}
 }
 
 func execPrompt() {
