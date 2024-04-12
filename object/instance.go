@@ -21,7 +21,7 @@ func (c *Instance) String() string {
 // --------------------------------------------------------
 
 func NewInstance(class *Class) *Instance {
-	return &Instance{Class: class}
+	return &Instance{Class: class, Fields: map[string]value.Value{}}
 }
 
 func (i *Instance) Get(name string) (value.Value, bool) {
