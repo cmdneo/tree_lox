@@ -3,7 +3,6 @@ package object
 import (
 	"fmt"
 	"tree_lox/ast"
-	"tree_lox/value"
 )
 
 type Function struct {
@@ -45,24 +44,3 @@ func (f *Function) newBind(instance *Instance) *Function {
 
 	return &Function{Declaration: f.Declaration, Enclosing: env}
 }
-
-// TODO Move it somewhere else.
-type NativeFunction struct {
-	Arity_   int
-	Function func(args ...value.Value) value.Value
-	Name     string
-}
-
-func (n *NativeFunction) Arity() int {
-	return n.Arity_
-}
-
-// Implement the value.Value interface
-// --------------------------------------------------------
-func (*NativeFunction) LoxValueMarkerFunc() {}
-
-func (n *NativeFunction) String() string {
-	return fmt.Sprintf("<native fn %v>", n.Name)
-}
-
-// --------------------------------------------------------

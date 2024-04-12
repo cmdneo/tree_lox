@@ -10,35 +10,44 @@ import (
 	"tree_lox/value"
 )
 
+const maxCallDepth int = 1024
+
 type Interpreter struct {
 	// Global variables
 	globals map[string]value.Value
 	// Local variable scopes
 	localEnv *object.LocalEnv
 	// Functions we are currently inside.
-	calledFunctions []string
-	calledFunction  []callInfo
-	// Current stack distance from the error site.
-	errorDistance int
+	calledFunctions []callInfo
 	// Return value, only one function returns it value at a time.
 	returnedValue value.Value
 }
 
+// Call info for generating stack traces
+type callInfo struct {
+	Name string
+	Line int
+}
+
 type runtimeError struct{}
 
-type callInfo struct {
-	FunctionName string
-	CallLine     int
+// For the 'error' interface
+func (r runtimeError) Error() string {
+	return "Runtime error"
 }
 
 func MakeInterpreter() Interpreter {
+	globals := map[string]value.Value{}
+
+	// Add the native functions into global scope.
+	for _, nfn := range object.NativeFunctionsList {
+		globals[nfn.Name] = nfn
+	}
+
 	return Interpreter{
-		globals:  make(map[string]value.Value),
-		localEnv: nil,
-		// The top-level implicit function is named '<script>'.
-		calledFunctions: []string{"<script>"},
-		calledFunction:  []callInfo{},
-		errorDistance:   0,
+		globals:         globals,
+		localEnv:        nil,
+		calledFunctions: []callInfo{},
 	}
 }
 
@@ -47,18 +56,16 @@ func (i *Interpreter) Interpret(statements []ast.Stmt) {
 		switch err := recover().(type) {
 		case nil:
 		case runtimeError:
-			// Just handle it, the error messages when the error is made and
-			// TODO Print call stack for error
+			// Just handle it, the error messages and stack trace is
+			// printed when this error was created.
 		default:
 			panic(err)
 		}
 	}()
 
-	// Discard all previous local environments (if any) left due to
-	// any error in the code executed.
+	// Discard all previous local environments (if any) left due to errors.
 	i.localEnv = nil
-	i.calledFunctions = i.calledFunctions[:1]
-	i.errorDistance = 0
+	i.calledFunctions = []callInfo{{Line: 0, Name: "<script>"}}
 
 	for _, stmt := range statements {
 		i.execute(stmt)
@@ -355,7 +362,71 @@ func (i *Interpreter) VisitUnaryExpr(e *ast.Unary) value.Value {
 }
 
 func (i *Interpreter) VisitCallExpr(e *ast.Call) value.Value {
-	return i.performCall(e)
+	callee := i.evaluate(e.Callee)
+	name, arity := getArityAndName(callee)
+
+	if arity < 0 {
+		panic(i.makeError(e.Paren, "Can only call functions and classes."))
+
+	}
+	if arity != len(e.Arguments) {
+		panic(i.makeError(
+			e.Paren, "Expected %v arguments but got %v arguments.",
+			arity, len(e.Arguments),
+		))
+	}
+
+	// Evaluate the arguments and put the resulting values inside
+	// a newly created function environment.
+	fun_env := object.NewLocalEnv(nil)
+	for _, arg := range e.Arguments {
+		fun_env.PushVariable(i.evaluate(arg))
+	}
+
+	// Enforce a maximum call depth before starting the call but after
+	// evaliating the arguments. The before and after is completely arbtriary.
+	if len(i.calledFunctions) == maxCallDepth {
+		panic(i.makeError(
+			e.Paren, "Max call depth %v reached.",
+			maxCallDepth-1, // Exclude the top-level from depth count shown.
+		))
+	}
+
+	// Push the call ifno for stack trace generation.
+	call_info := callInfo{Line: e.Paren.Line, Name: name}
+	i.calledFunctions = append(i.calledFunctions, call_info)
+
+	// Perform the call
+	switch callable := callee.(type) {
+	case *object.Class:
+		instance := object.NewInstance(callable)
+		if method, ok := instance.Get("init"); ok {
+			// If 'init' is present in a blank instance it must be a function.
+			method := method.(*object.Function)
+			fun_env.SetEnclosing(method.Enclosing)
+			i.executeBlock(method.Declaration.Body, fun_env)
+		}
+		i.returnedValue = instance
+
+	case *object.Function:
+		fun_env.SetEnclosing(callable.Enclosing)
+		i.returnedValue = value.Nil{} // Default return value
+		// Return value will be set by the return statement(if any) executed.
+		i.executeBlock(callable.Declaration.Body, fun_env)
+
+	case *object.NativeFunction:
+		i.returnedValue = callable.Call(fun_env.GetAllValues())
+
+	default:
+		panic("Attempt to call a non-callable object.")
+	}
+
+	// Pop the call info, here we don't use a defer to pop it at end.
+	// Because, on an error(as a panic on RuntimeError) this needs to be
+	// preserved for stack trace generation.
+	util.Pop(&i.calledFunctions)
+
+	return i.returnedValue
 }
 
 func (i *Interpreter) VisitGetExpr(e *ast.Get) value.Value {
@@ -416,12 +487,21 @@ func (i *Interpreter) VisitVariableExpr(e *ast.Variable) value.Value {
 func (i *Interpreter) makeError(
 	tok token.Token, format string, args ...any,
 ) runtimeError {
-	i.errorDistance = 0
+	// Set location in the current function to as provided
+	util.Last(i.calledFunctions).Line = tok.Line
 
 	// Print the message...
 	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	// and the location(in current function) of the error.
-	printLocation(0, tok.Line, *util.Last(i.calledFunctions))
+
+	// Print stack trace
+	distance := 0
+	for len(i.calledFunctions) > 0 {
+		frame := *util.Last(i.calledFunctions)
+		printLocation(distance, frame.Line, frame.Name)
+
+		util.Pop(&i.calledFunctions)
+		distance++
+	}
 
 	return runtimeError{}
 }
@@ -445,64 +525,6 @@ func (i *Interpreter) executeBlock(
 	}
 
 	return ast.ControlLinear
-}
-
-// Performs call and returns the return value.
-func (i *Interpreter) performCall(e *ast.Call) value.Value {
-	callee := i.evaluate(e.Callee)
-	arity, name, ok := getCallableInfo(callee)
-
-	if !ok {
-		panic(i.makeError(e.Paren, "Can only call functions and classes."))
-	}
-
-	if arity != len(e.Arguments) {
-		panic(i.makeError(
-			e.Paren, "Expected %v arguments but got %v arguments.",
-			arity, len(e.Arguments),
-		))
-	}
-
-	// Push the callable name for stack trace generation.
-	i.calledFunctions = append(i.calledFunctions, name)
-	defer util.Pop(&i.calledFunctions)
-
-	// Evaluate arguments and put their values inside the newly created
-	// function's environment.
-	fun_env := object.NewLocalEnv(nil)
-	for _, arg := range e.Arguments {
-		fun_env.PushVariable(i.evaluate(arg))
-	}
-
-	// TODO improve this garbage!
-	switch obj := callee.(type) {
-	case *object.Class:
-		// Create the instance
-		instance := &object.Instance{
-			Fields: make(map[string]value.Value),
-			Class:  obj,
-		}
-
-		if init, ok := instance.Get("init"); ok {
-			// Since the instance is blank the "init" must be a function.
-			fun := init.(*object.Function)
-			fun_env.SetEnclosing(fun.Enclosing)
-			i.executeBlock(fun.Declaration.Body, fun_env)
-		}
-
-		return instance
-
-	case *object.Function:
-		fun_env.SetEnclosing(obj.Enclosing)
-		i.executeBlock(obj.Declaration.Body, fun_env)
-		return i.returnedValue
-
-	case *object.NativeFunction:
-		return obj.Function(fun_env.GetAllValues()...)
-
-	default:
-		panic("Non callable object called.")
-	}
 }
 
 // Defines a variable in the current scope(can be local or global).
@@ -535,28 +557,16 @@ func printLocation(distance, line int, funName string) {
 	fmt.Fprintf(os.Stderr, "%5v: [line %v] in %v\n", distance, line, funName)
 }
 
-// Get info if callable object, return arity and name, along with
-// if callable(as boolean).
-func getCallableInfo(callable any) (int, string, bool) {
-	arity := -1
-	name := ""
-
-	switch obj := callable.(type) {
-	case *object.Class:
-		arity = obj.Arity()
-		name = obj.Name
-
+// Tries to convert a value to callable, returns -1 arity if not a callable.
+func getArityAndName(callee value.Value) (string, int) {
+	switch v := callee.(type) {
 	case *object.Function:
-		arity = obj.Arity()
-		name = obj.Declaration.Name.Lexeme
-
+		return v.Declaration.Name.Lexeme, v.Arity()
 	case *object.NativeFunction:
-		arity = obj.Arity()
-		name = obj.Name
-
-	default:
-		return arity, name, false
+		return v.Name, v.Arity()
+	case *object.Class:
+		return v.Name, v.Arity()
 	}
 
-	return arity, name, true
+	return "", -1
 }
