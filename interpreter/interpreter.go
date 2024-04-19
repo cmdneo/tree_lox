@@ -298,8 +298,7 @@ func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) value.Value {
 		if hasType[value.Number](left, right) {
 			return
 		}
-		panic(i.makeError(e.Operator,
-			"Operands must be either two strings or two numbers."))
+		panic(i.makeError(e.Operator, "Operands must numbers."))
 	}
 
 	check_num_or_str := func() {
@@ -307,7 +306,8 @@ func (i *Interpreter) VisitBinaryExpr(e *ast.Binary) value.Value {
 			hasType[value.String](left, right) {
 			return
 		}
-		panic(i.makeError(e.Operator, "Operands must numbers."))
+		panic(i.makeError(e.Operator,
+			"Operands must be either two strings or two numbers."))
 	}
 
 	switch e.Operator.Kind {
